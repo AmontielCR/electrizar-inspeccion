@@ -74,7 +74,7 @@ async function getMSToken() {
         .replace(/[^a-zA-Z0-9\s]/g, "").trim()
         .replace(/\s+/g, "_").slice(0, 25);
       const folderName = `${informe.codigo}-${clienteSlug}`;
-      const folderPath = `Electrizar-Reportes/${folderName}`;
+      const folderPath = `Electrizar\1-Proyectos\Verificacion-2026/${folderName}`;
   
       // Crear carpeta
       await ensureFolder(token, userEmail, folderPath);
