@@ -21,7 +21,7 @@ Responde SOLO con JSON válido sin texto adicional ni backticks ni markdown:
 Reglas: cita Art. NEC 2020 en CADA hallazgo, máximo 5 de cada uno, español técnico.
 Sin observaciones visibles → {"hallazgos":["Sin observaciones."],"acciones":["Verificar sellos y fijación en campo."]}`;
 
-const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${process.env.GEMINI_API_KEY}`;
+const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${process.env.GEMINI_API_KEY}`;
 
     const response = await fetch(url, {
       method: "POST",
