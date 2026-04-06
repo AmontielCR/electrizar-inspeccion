@@ -7,7 +7,24 @@ import {
 import {
   getStorage, ref, uploadString, getDownloadURL, deleteObject,
 } from "firebase/storage";
+import { LOGO_ICON, LOGO_FULL } from "./logos";
 
+const Logo = ({ sm, white }) => (
+  <div className="flex items-center gap-2">
+    <img
+      src={LOGO_ICON}
+      alt="Electrizar"
+      className={`${sm ? "w-7 h-7" : "w-10 h-10"} rounded-md object-contain flex-shrink-0`}
+      style={{ background: "#F5A800" }}
+    />
+    <img
+      src={LOGO_FULL}
+      alt="Electrizar Electromecánica"
+      className={`${sm ? "h-7" : "h-9"} object-contain`}
+      style={{ filter: white ? "brightness(10)" : "none" }}
+    />
+  </div>
+);
 /* ═══════════════════════════════════════════
    FIREBASE
 ═══════════════════════════════════════════ */
