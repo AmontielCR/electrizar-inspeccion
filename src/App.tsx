@@ -25,10 +25,8 @@ const storage = getStorage(fbApp);
 
 /* ── Firestore helpers ── */
 const saveInformeFS = async (informe) => {
-  // Guardar elementos sin b64 (las fotos van a Storage)
   const data = {
     ...informe,
-    elementos: (informe.elementos || []).map(e => ({ ...e, b64: null })),
     updatedAt: serverTimestamp(),
   };
   await setDoc(doc(db, "informes", String(informe.id)), data);
@@ -92,9 +90,9 @@ const lsto = {
 const processPhoto = (file) =>
   new Promise((res, rej) => {
     const img = new Image();
-    const u   = URL.createObjectURL(file);
+    const u = URL.createObjectURL(file);
     img.onload = () => {
-      const max = 1100;
+      const max = 800;
       let w = img.width, h = img.height;
       if (w > max) { h = Math.round(h * max / w); w = max; }
       if (h > max) { w = Math.round(w * max / h); h = max; }
@@ -102,7 +100,7 @@ const processPhoto = (file) =>
       c.width = w; c.height = h;
       c.getContext("2d").drawImage(img, 0, 0, w, h);
       URL.revokeObjectURL(u);
-      const dUrl = c.toDataURL("image/jpeg", 0.82);
+      const dUrl = c.toDataURL("image/jpeg", 0.65);
       res({ url: dUrl, b64: dUrl.split(",")[1] });
     };
     img.onerror = rej;
@@ -576,21 +574,12 @@ function InspeccionView({informe,onUpdate,onBack,onFinalize,onPreview}) {
   const [finalM,setFinalM]=useState(false);
   const [syncing,setSyncing]=useState(false);
 
-  const saveEl=async(el)=>{
-    const els=[...(informe.elementos||[])];
-    if(editIdx!==null)els[editIdx]={...el,num:editIdx+1};
-    else els.push({...el,num:els.length+1});
-    const updated={...informe,elementos:els};
+  const saveEl = async (el) => {
+    const els = [...(informe.elementos || [])];
+    if (editIdx !== null) els[editIdx] = { ...el, num: editIdx + 1 };
+    else els.push({ ...el, num: els.length + 1 });
+    const updated = { ...informe, elementos: els };
     setSyncing(true);
-    // Upload photo to Firebase Storage
-    if(el.url&&el.url.startsWith("data:")){
-      try{
-        const dlUrl=await uploadPhoto(informe.id,el.num,el.url);
-        const idx=editIdx!==null?editIdx:els.length-1;
-        els[idx]={...els[idx],url:dlUrl,b64:null};
-        updated.elementos=els;
-      }catch(e){console.warn("Photo upload:",e);}
-    }
     await saveInformeFS(updated);
     setSyncing(false);
     onUpdate(updated);
