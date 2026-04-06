@@ -26,6 +26,10 @@ const saveInformeFS = async (informe) => {
   });
 };
 
+const deleteInformeFS = async (id) => {
+  await deleteDoc(doc(db, "informes", String(id)));
+};
+
 /* ═══════════════════════════════════════════
    USUARIOS
 ═══════════════════════════════════════════ */
@@ -51,11 +55,8 @@ const PRIOS = [
   { v:"normal", L:"Normal", c:Y,         tw:"bg-amber-50 text-amber-700 border-amber-200" },
   { v:"baja",   L:"Baja",   c:"#16a34a", tw:"bg-green-50 text-green-700 border-green-200" },
 ];
-
-// Resultados según tipo de informe
 const RESULTADOS_VERIFICACION = ["Aprobada","Condicionada","Rechazada"];
 const RESULTADOS_INSPECCION   = ["Aprobada","No Aprobada"];
-
 const HOY   = new Date().toISOString().split("T")[0];
 const MESES = ["enero","febrero","marzo","abril","mayo","junio","julio","agosto","septiembre","octubre","noviembre","diciembre"];
 
@@ -87,7 +88,6 @@ const processPhoto = (file) =>
     img.src = u;
   });
 
-/* ── FIXED callAI: sends b64 + titulo to proxy ── */
 const callAI = async (b64, titulo) => {
   const r = await fetch("/api/analyze", {
     method: "POST",
@@ -100,165 +100,217 @@ const callAI = async (b64, titulo) => {
   return d;
 };
 
-/* ── PDF generation using browser print with blob ── */
-const generateAndDownloadPDF = (informe) => {
-  const nEl   = informe.elementos?.length || 0;
-  const total = nEl + 2;
-
-  const pageStyle = `
-    body { font-family: Arial, sans-serif; margin: 0; padding: 0; background: white; }
-    .page { page-break-after: always; padding: 20px 25px; min-height: 270mm;
-            display: flex; flex-direction: column; border-bottom: 1px solid #eee; }
-    .page:last-child { page-break-after: avoid; }
-    .header { display: flex; justify-content: space-between; align-items: flex-start;
-              border-bottom: 2px solid #eee; padding-bottom: 10px; margin-bottom: 8px; }
-    .company-info { text-align: right; font-size: 9px; color: #555; line-height: 1.5; }
-    .footer { display: flex; justify-content: space-between; align-items: center;
-              border-top: 2px solid #eee; margin-top: auto; padding-top: 10px; font-size: 9px; color: #888; }
-    .logo-box { background: #F5A800; width: 28px; height: 28px; display: inline-flex;
-                align-items: center; justify-content: center; border-radius: 4px; }
-    .logo-row { display: flex; align-items: center; gap: 8px; }
-    .logo-text { font-size: 11px; font-weight: bold; }
-    .logo-sub  { font-size: 8px; color: #F5A800; }
-    .badge { font-size: 9px; font-weight: bold; padding: 2px 8px; border-radius: 20px; border: 1px solid; display: inline-block; }
-    .badge-alta   { background: #fef2f2; color: #dc2626; border-color: #fecaca; }
-    .badge-normal { background: #fffbeb; color: #d97706; border-color: #fde68a; }
-    .badge-baja   { background: #f0fdf4; color: #16a34a; border-color: #bbf7d0; }
-    .el-row { display: flex; gap: 20px; }
-    .el-img { width: 200px; height: 180px; object-fit: cover; border-radius: 8px; border: 1px solid #ddd; flex-shrink: 0; }
-    .el-img-empty { width: 200px; height: 180px; background: #f3f4f6; border-radius: 8px; flex-shrink: 0;
-                    display: flex; align-items: center; justify-content: center; font-size: 32px; }
-    h1 { font-size: 20px; font-weight: 900; margin: 0 0 8px; }
-    h2 { font-size: 15px; font-weight: 900; margin: 0 0 12px; }
-    p  { font-size: 11px; color: #555; line-height: 1.6; margin: 0 0 6px; }
-    .label { font-weight: bold; font-size: 11px; }
-    .num   { font-size: 9px; color: #aaa; text-align: right; margin-top: 6px; }
-    .cover-center { display: flex; flex-direction: column; align-items: center; text-align: center; padding: 40px 0; }
-    .cover-icon { width: 80px; height: 80px; background: #FFF3CD; border-radius: 16px;
-                  display: flex; align-items: center; justify-content: center; font-size: 40px; margin-bottom: 20px; }
-    .info-table { text-align: left; width: 280px; }
-    .info-table div { margin-bottom: 5px; font-size: 12px; }
-    .sig-line { border-bottom: 2px solid #ccc; width: 200px; margin-bottom: 6px; margin-top: 60px; }
-    @media print {
-      body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-    }
-  `;
-
-  const logoSVG = `<div class="logo-box"><svg viewBox="0 0 22 22" width="16" height="16" fill="white"><rect x="2" y="2" width="18" height="3"/><rect x="2" y="8.5" width="11" height="3"/><rect x="2" y="15" width="18" height="3"/><polygon points="14,8.5 18,8.5 15,12.5 19,12.5 12,20 13,13.5 9,13.5"/></svg></div>`;
-
-  const logoHTML = `<div class="logo-row">${logoSVG}<div><div class="logo-text">Electrizar</div><div class="logo-sub">Constructora Electromecánica</div></div></div>`;
-
-  const headerHTML = `
-    <div class="header">
-      ${logoHTML}
-      <div class="company-info">
-        <b>Empresa:</b> ${CO.nombre} &nbsp;|&nbsp; <b>N.º de elementos:</b> ${nEl}<br/>
-        <b>Teléfono:</b> ${CO.tel} &nbsp;|&nbsp; <b>Correo:</b> ${CO.correo}<br/>
-        <b>Dirección:</b> ${CO.dir}
-      </div>
-    </div>`;
-
-  const footerHTML = (page) => `
-    <div class="footer">${logoHTML}<span>página ${page} de ${total}</span></div>`;
-
-  const tipoLabel = informe.tipo === "inspeccion" ? "Inspección" : "Verificación";
-  const fmtFechaLocal = (iso) => {
-    if (!iso) return "";
-    const [y,m,d] = iso.split("-");
-    return `${d} de ${MESES[+m-1]} de ${y}`;
-  };
-
-  // Portada
-  const portada = `
-    <div class="page">
-      ${headerHTML}
-      <div class="cover-center">
-        <div class="cover-icon">⚡</div>
-        <h1>${informe.codigo} — Informe ${tipoLabel} Eléctrica</h1>
-        <p style="max-width:400px;margin-bottom:24px;">Informe fotográfico con resumen de hallazgos y acciones requeridas para la ${tipoLabel} Eléctrica.</p>
-        <div class="info-table">
-          <div><span class="label">Propietario:</span> ${informe.propietario}</div>
-          <div><span class="label">Dirección:</span> ${informe.direccion}</div>
-          <div><span class="label">Fecha:</span> ${fmtFechaLocal(informe.fecha)}</div>
-          <div><span class="label">Versión:</span> 0.1V</div>
-          ${informe.ingeniero ? `<div><span class="label">Responsable:</span> ${informe.ingeniero}. ${informe.matricula}.</div>` : ""}
-        </div>
-      </div>
-      ${footerHTML(1)}
-    </div>`;
-
-  // Limitaciones
-  const limitaciones = `
-    <div class="page">
-      ${headerHTML}
-      <h2>Análisis y Limitaciones del presente informe fotográfico:</h2>
-      <p>El presente informe fotográfico documenta las no conformidades identificadas durante la verificación visual de las instalaciones eléctricas, conforme al artículo 5.2 del Reglamento de Oficialización del Código Eléctrico de Costa Rica (RTCR 458:2011), Decreto Ejecutivo N.° 36979-MEIC y sus reformas. La evaluación se fundamenta en el Anexo B para condiciones de "Peligro Inminente" o "Alto Riesgo", complementada con las referencias del Código Eléctrico NFPA 70 (NEC), edición 2020.</p>
-      <p>Los hallazgos se sustentan en la evidencia visible al momento de la inspección. Durante la ejecución de reparaciones, toda condición adicional que represente incumplimiento normativo deberá ser corregida, aun cuando no haya sido señalada individualmente en este informe.</p>
-      ${footerHTML(2)}
-    </div>`;
-
-  // Elementos
-  const elementos = (informe.elementos || []).map((el, i) => {
-    const badgeClass = el.prioridad === "alta" ? "badge-alta" : el.prioridad === "baja" ? "badge-baja" : "badge-normal";
-    const badgeLabel = el.prioridad === "alta" ? "Alta" : el.prioridad === "baja" ? "Baja" : "Normal";
-    const hallazgos  = (el.hallazgos || []).map(h => `<p>-${h}</p>`).join("");
-    const acciones   = (el.acciones  || []).map(a => `<p>-${a}</p>`).join("");
-    const imgHTML    = el.url
-      ? `<img class="el-img" src="${el.url}" alt="${el.titulo}"/>`
-      : `<div class="el-img-empty">📷</div>`;
-    return `
-      <div class="page">
-        ${headerHTML}
-        <div class="el-row">
-          ${imgHTML}
-          <div style="flex:1;min-width:0;">
-            <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap;">
-              <span class="label">Título: ${el.titulo}</span>
-              <span class="badge ${badgeClass}">${badgeLabel}</span>
-            </div>
-            <p class="label">Hallazgos:</p>${hallazgos}
-            <p class="label" style="margin-top:10px;">Acciones requeridas:</p>${acciones}
-          </div>
-        </div>
-        <div class="num">(${el.num})</div>
-        ${footerHTML(i + 3)}
-      </div>`;
-  }).join("");
-
-  // Cierre
-  const plazoHTML = informe.tipo !== "inspeccion" && informe.plazo
-    ? `<div><span class="label">Plazo para ejecución de mejoras:</span> ${informe.plazo}.</div>` : "";
-  const notasHTML = informe.notas
-    ? `<div style="margin-top:6px;"><span class="label">Notas adicionales:</span><p>${informe.notas}</p></div>` : "";
-
-  const cierre = `
-    <div class="page">
-      ${headerHTML}
-      <h2>Final de Reporte</h2>
-      <div style="font-size:13px;color:#374151;line-height:2;">
-        <div><span class="label">Resultado de ${tipoLabel.toLowerCase()}:</span> ${informe.resultado}.</div>
-        ${plazoHTML}
-        ${notasHTML}
-      </div>
-      ${informe.ingeniero ? `<div class="sig-line"></div><div style="font-size:12px;"><b>${informe.ingeniero}</b><br/>${informe.matricula}</div>` : ""}
-      ${footerHTML(total)}
-    </div>`;
-
-  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${informe.codigo}</title>
-    <style>${pageStyle}</style></head><body>${portada}${limitaciones}${elementos}${cierre}</body></html>`;
-
-  // Open in new tab → print/save as PDF
-  const w = window.open("", "_blank");
-  if (!w) { alert("Permite ventanas emergentes para generar el PDF."); return; }
-  w.document.write(html);
-  w.document.close();
-  w.onload = () => { w.focus(); w.print(); };
-};
-
 const fmtFecha = (iso) => {
   if (!iso) return "";
   const [y,m,d] = iso.split("-");
   return `${d} de ${MESES[+m-1]} de ${y}`;
+};
+
+/* ═══════════════════════════════════════════
+   PDF GENERATOR — LANDSCAPE LETTER, 1 PAGE PER ELEMENT
+═══════════════════════════════════════════ */
+const generateAndDownloadPDF = (informe) => {
+  const nEl      = informe.elementos?.length || 0;
+  const total    = nEl + 2; // portada + limitaciones + elementos + cierre = nEl+3 but we count portada+limitaciones as 2
+  const tipoLabel = informe.tipo === "inspeccion" ? "Inspección" : "Verificación";
+
+  const style = `
+    @page { size: letter landscape; margin: 12mm 14mm; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: Arial, Helvetica, sans-serif; font-size: 10pt;
+           background: white; color: #222; }
+    .page { width: 100%; page-break-after: always;
+            display: flex; flex-direction: column;
+            min-height: calc(100vh - 24mm); }
+    .page:last-child { page-break-after: avoid; }
+    /* HEADER */
+    .hdr { display:flex; justify-content:space-between; align-items:flex-start;
+           border-bottom: 2px solid #eee; padding-bottom: 6px; margin-bottom: 6px; }
+    .hdr-left { display:flex; align-items:center; gap:8px; }
+    .logo-box { background:#F5A800; width:26px; height:26px; border-radius:4px;
+                display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+    .logo-name { font-weight:900; font-size:11pt; line-height:1.2; }
+    .logo-sub  { font-size:7pt; color:#F5A800; }
+    .hdr-right { text-align:right; font-size:7.5pt; color:#666; line-height:1.6; }
+    .divider { border-top:1px solid #ddd; margin-bottom:8px; }
+    /* FOOTER */
+    .ftr { margin-top:auto; padding-top:6px; border-top:2px solid #eee;
+           display:flex; justify-content:space-between; align-items:center;
+           font-size:7.5pt; color:#999; }
+    /* COVER */
+    .cover-body { flex:1; display:flex; flex-direction:column; align-items:center;
+                  justify-content:center; text-align:center; padding:10px 0; }
+    .cover-icon { font-size:36pt; margin-bottom:12px; }
+    .cover-title { font-size:16pt; font-weight:900; margin-bottom:8px; }
+    .cover-sub  { font-size:9.5pt; color:#666; margin-bottom:16px; max-width:420px; }
+    .cover-info { text-align:left; font-size:10pt; line-height:1.8; }
+    /* ELEMENT PAGE — 2 COLUMNS */
+    .el-body { flex:1; display:flex; gap:16px; align-items:flex-start; padding:4px 0; }
+    .el-img  { width:280px; height:200px; object-fit:cover; border-radius:6px;
+               border:1px solid #ddd; flex-shrink:0; }
+    .el-img-empty { width:280px; height:200px; background:#f3f4f6; border-radius:6px;
+                    flex-shrink:0; display:flex; align-items:center; justify-content:center;
+                    font-size:28pt; color:#ccc; }
+    .el-content { flex:1; min-width:0; }
+    .el-title-row { display:flex; align-items:center; gap:8px; margin-bottom:8px; flex-wrap:wrap; }
+    .el-title { font-weight:900; font-size:11pt; }
+    .badge { font-size:7.5pt; font-weight:bold; padding:2px 8px; border-radius:12px;
+             border:1px solid; display:inline-block; }
+    .badge-alta   { background:#fef2f2; color:#dc2626; border-color:#fecaca; }
+    .badge-normal { background:#fffbeb; color:#d97706; border-color:#fde68a; }
+    .badge-baja   { background:#f0fdf4; color:#16a34a; border-color:#bbf7d0; }
+    .section-lbl { font-weight:bold; font-size:9pt; margin-bottom:3px; margin-top:8px; color:#333; }
+    .item-line { font-size:9pt; line-height:1.5; color:#444; }
+    .el-num { font-size:7.5pt; color:#bbb; text-align:right; margin-top:4px; }
+    /* CLOSING */
+    .closing-body { flex:1; padding:8px 0; }
+    .closing-body h2 { font-size:13pt; font-weight:900; margin-bottom:12px; }
+    .closing-row { font-size:10.5pt; line-height:2; }
+    .sig-block { margin-top:40px; }
+    .sig-line { border-bottom:2px solid #aaa; width:200px; margin-bottom:6px; }
+    /* LIMITATIONS */
+    .lim-body { flex:1; padding:4px 0; }
+    .lim-body h2 { font-size:13pt; font-weight:900; margin-bottom:10px; }
+    .lim-body p { font-size:9pt; line-height:1.6; color:#444; margin-bottom:8px; }
+    @media print {
+      body { -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+    }
+  `;
+
+  const logoSVG = `<svg viewBox="0 0 22 22" width="16" height="16" fill="white">
+    <rect x="2" y="2" width="18" height="3"/>
+    <rect x="2" y="8.5" width="11" height="3"/>
+    <rect x="2" y="15" width="18" height="3"/>
+    <polygon points="14,8.5 18,8.5 15,12.5 19,12.5 12,20 13,13.5 9,13.5"/>
+  </svg>`;
+
+  const hdrLeft = `
+    <div class="hdr-left">
+      <div class="logo-box">${logoSVG}</div>
+      <div>
+        <div class="logo-name">Electrizar</div>
+        <div class="logo-sub">Constructora Electromecánica</div>
+      </div>
+    </div>`;
+
+  const hdrRight = `
+    <div class="hdr-right">
+      <b>Empresa:</b> ${CO.nombre} &nbsp;|&nbsp; <b>N.º de elementos:</b> ${nEl}<br/>
+      <b>Teléfono:</b> ${CO.tel} &nbsp;|&nbsp; <b>Correo:</b> ${CO.correo}<br/>
+      <b>Dirección:</b> ${CO.dir}
+    </div>`;
+
+  const header = `<div class="hdr">${hdrLeft}${hdrRight}</div><div class="divider"></div>`;
+
+  const footer = (page) => `
+    <div class="ftr">${hdrLeft}<span>página ${page} de ${total}</span></div>`;
+
+  /* ── PORTADA ── */
+  const portada = `
+    <div class="page">
+      ${header}
+      <div class="cover-body">
+        <div class="cover-icon">⚡</div>
+        <div class="cover-title">${informe.codigo} — Informe ${tipoLabel} Eléctrica</div>
+        <div class="cover-sub">Informe fotográfico con resumen de hallazgos y acciones requeridas para la ${tipoLabel} Eléctrica.</div>
+        <div class="cover-info">
+          <div><b>Propietario:</b> ${informe.propietario}</div>
+          <div><b>Dirección:</b> ${informe.direccion}</div>
+          <div><b>Fecha:</b> ${fmtFecha(informe.fecha)}</div>
+          <div><b>Versión:</b> 0.1V</div>
+          ${informe.ingeniero ? `<div><b>Responsable:</b> ${informe.ingeniero}${informe.matricula ? ". " + informe.matricula : ""}.</div>` : ""}
+        </div>
+      </div>
+      ${footer(1)}
+    </div>`;
+
+  /* ── LIMITACIONES ── */
+  const limitaciones = `
+    <div class="page">
+      ${header}
+      <div class="lim-body">
+        <h2>Análisis y Limitaciones del presente informe fotográfico:</h2>
+        <p>El presente informe fotográfico documenta las no conformidades identificadas durante la verificación visual de las instalaciones eléctricas, conforme al artículo 5.2 del Reglamento de Oficialización del Código Eléctrico de Costa Rica (RTCR 458:2011), Decreto Ejecutivo N.° 36979-MEIC y sus reformas. La evaluación se fundamenta en el Anexo B para condiciones de "Peligro Inminente" o "Alto Riesgo", complementada con las referencias del Código Eléctrico NFPA 70 (NEC), edición 2020.</p>
+        <p>Los hallazgos se sustentan en la evidencia visible al momento de la inspección. Durante la ejecución de reparaciones, toda condición adicional que represente incumplimiento normativo deberá ser corregida, aun cuando no haya sido señalada individualmente en este informe.</p>
+      </div>
+      ${footer(2)}
+    </div>`;
+
+  /* ── ELEMENTOS — 1 por página ── */
+  const elementos = (informe.elementos || []).map((el, i) => {
+    const bc = el.prioridad === "alta" ? "badge-alta" : el.prioridad === "baja" ? "badge-baja" : "badge-normal";
+    const bl = el.prioridad === "alta" ? "Alta"       : el.prioridad === "baja" ? "Baja"       : "Normal";
+    const imgTag = el.url
+      ? `<img class="el-img" src="${el.url}" alt="${el.titulo}"/>`
+      : `<div class="el-img-empty">📷</div>`;
+    const hallazgos = (el.hallazgos || []).map(h => `<div class="item-line">- ${h}</div>`).join("");
+    const acciones  = (el.acciones  || []).map(a => `<div class="item-line">- ${a}</div>`).join("");
+    return `
+      <div class="page">
+        ${header}
+        <div class="el-body">
+          ${imgTag}
+          <div class="el-content">
+            <div class="el-title-row">
+              <span class="el-title">Título: ${el.titulo}</span>
+              <span class="badge ${bc}">${bl}</span>
+            </div>
+            <div class="section-lbl">Hallazgos:</div>
+            ${hallazgos || '<div class="item-line" style="color:#aaa">Sin hallazgos registrados.</div>'}
+            <div class="section-lbl">Acciones requeridas:</div>
+            ${acciones  || '<div class="item-line" style="color:#aaa">Sin acciones registradas.</div>'}
+            <div class="el-num">(${el.num})</div>
+          </div>
+        </div>
+        ${footer(i + 3)}
+      </div>`;
+  }).join("");
+
+  /* ── CIERRE ── */
+  const plazoHTML = informe.tipo !== "inspeccion" && informe.plazo && informe.plazo !== "N/A"
+    ? `<div><b>Plazo para ejecución de mejoras:</b> ${informe.plazo}.</div>` : "";
+  const notasHTML = informe.notas
+    ? `<div><b>Notas adicionales:</b> ${informe.notas}</div>` : "";
+
+  const cierre = `
+    <div class="page">
+      ${header}
+      <div class="closing-body">
+        <h2>Final de Reporte</h2>
+        <div class="closing-row">
+          <div><b>Resultado de ${tipoLabel.toLowerCase()}:</b> ${informe.resultado}.</div>
+          ${plazoHTML}
+          ${notasHTML}
+        </div>
+        ${informe.ingeniero ? `
+          <div class="sig-block">
+            <div class="sig-line"></div>
+            <div style="font-size:10pt;"><b>${informe.ingeniero}</b><br/>${informe.matricula || ""}</div>
+          </div>` : ""}
+      </div>
+      ${footer(total)}
+    </div>`;
+
+  const html = `<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8"/>
+  <title>${informe.codigo} — ${tipoLabel} Eléctrica</title>
+  <style>${style}</style>
+</head>
+<body>
+  ${portada}
+  ${limitaciones}
+  ${elementos}
+  ${cierre}
+</body>
+</html>`;
+
+  const w = window.open("", "_blank");
+  if (!w) { alert("Permite ventanas emergentes para generar el PDF."); return; }
+  w.document.write(html);
+  w.document.close();
+  w.onload = () => { w.focus(); setTimeout(()=>w.print(), 400); };
 };
 
 /* ═══════════════════════════════════════════
@@ -282,41 +334,33 @@ const Logo = ({ sm, white }) => (
 );
 
 const Badge = ({v}) => { const p=PRIOS.find(x=>x.v===v)||PRIOS[1]; return <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${p.tw}`}>{p.L}</span>; };
-
-const ResBadge = ({v,tipo}) => {
+const ResBadge = ({v}) => {
   if (!v) return null;
-  const isOk = v==="Aprobada";
-  const isCond = v==="Condicionada";
-  const cfg = isOk ? "bg-green-100 text-green-700" : isCond ? "bg-amber-100 text-amber-700" : "bg-red-100 text-red-700";
+  const cfg = v==="Aprobada"?"bg-green-100 text-green-700":v==="Condicionada"?"bg-amber-100 text-amber-700":"bg-red-100 text-red-700";
   return <span className={`text-[11px] font-bold px-2.5 py-1 rounded-full ${cfg}`}>{v}</span>;
 };
-
 const Pill = ({children,active,color,onClick}) => (
   <button onClick={onClick}
     className={`flex-1 py-2.5 rounded-xl text-sm font-bold border-2 transition-all ${active?"text-white":"border-gray-200 text-gray-400 bg-white hover:bg-gray-50"}`}
     style={active?{background:color||Y,borderColor:color||Y}:{}}>{children}</button>
 );
-
 const Btn = ({children,onClick,variant="pri",sm,disabled,full,className=""}) => {
   const base=`font-bold rounded-xl transition-all active:scale-95 flex items-center justify-center gap-1.5 ${sm?"px-3 py-2 text-sm":"px-5 py-3"} ${full?"w-full":""} ${className}`;
-  if (variant==="pri") return <button onClick={onClick} disabled={disabled} className={`${base} ${disabled?"opacity-50 cursor-not-allowed":"hover:opacity-90"}`} style={{background:disabled?"#9ca3af":Y,color:"white"}}>{children}</button>;
+  if(variant==="pri") return <button onClick={onClick} disabled={disabled} className={`${base} ${disabled?"opacity-50 cursor-not-allowed":"hover:opacity-90"}`} style={{background:disabled?"#9ca3af":Y,color:"white"}}>{children}</button>;
   return <button onClick={onClick} disabled={disabled} className={`${base} border-2 border-gray-200 bg-white text-gray-700 hover:bg-gray-50 ${disabled?"opacity-50":""}`}>{children}</button>;
 };
-
 const Card = ({title,children,accent}) => (
   <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
     {title&&<div className="px-4 pt-4 pb-2 flex items-center gap-2">{accent&&<div className="w-1 h-4 rounded-full" style={{background:Y}}/>}<h3 className="font-bold text-gray-700 text-xs uppercase tracking-widest">{title}</h3></div>}
     <div className="px-4 pb-4 space-y-3">{children}</div>
   </div>
 );
-
 const FI = ({label,value,onChange,...rest}) => (
   <div>
     <label className="block text-xs font-semibold text-gray-400 mb-1 uppercase tracking-wider">{label}</label>
     <input value={value} onChange={onChange} className="w-full border-2 border-gray-100 rounded-xl px-3 py-2.5 text-sm text-gray-800 bg-gray-50 focus:outline-none focus:border-amber-400 focus:bg-white transition-all" {...rest}/>
   </div>
 );
-
 const ListEditor = ({label,items,set,placeholder}) => (
   <div>
     <div className="flex items-center justify-between mb-2">
@@ -335,6 +379,43 @@ const ListEditor = ({label,items,set,placeholder}) => (
     </div>
   </div>
 );
+
+/* ═══════════════════════════════════════════
+   DELETE CONFIRM MODAL
+═══════════════════════════════════════════ */
+function DeleteModal({informe,onConfirm,onClose}) {
+  const [loading,setLoading] = useState(false);
+  const handle = async () => {
+    setLoading(true);
+    await deleteInformeFS(informe.id);
+    onConfirm();
+  };
+  return (
+    <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4">
+      <div className="bg-white rounded-3xl p-6 w-full max-w-sm shadow-2xl">
+        <div className="w-14 h-14 rounded-2xl bg-red-100 flex items-center justify-center text-2xl mx-auto mb-4">🗑️</div>
+        <h3 className="font-extrabold text-gray-900 text-lg text-center mb-1">¿Eliminar informe?</h3>
+        <p className="text-sm text-gray-500 text-center mb-2">
+          <span className="font-mono font-bold text-gray-700">{informe.codigo}</span>
+        </p>
+        <p className="text-xs text-gray-400 text-center mb-6">
+          {informe.propietario} · {informe.fecha}<br/>
+          <span className="text-red-400 font-semibold">Esta acción no se puede deshacer.</span>
+        </p>
+        <div className="flex gap-3">
+          <button onClick={onClose} className="flex-1 py-3 rounded-xl font-bold text-sm border-2 border-gray-200 text-gray-600 hover:bg-gray-50 transition-colors">
+            Cancelar
+          </button>
+          <button onClick={handle} disabled={loading}
+            className="flex-1 py-3 rounded-xl font-bold text-sm text-white hover:opacity-90 transition-opacity disabled:opacity-60"
+            style={{background:"#dc2626"}}>
+            {loading ? "Eliminando…" : "Sí, eliminar"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 /* ═══════════════════════════════════════════
    LOGIN
@@ -372,7 +453,7 @@ function LoginView({onLogin}) {
 }
 
 /* ═══════════════════════════════════════════
-   SELECTOR DE TIPO (nuevo)
+   SELECTOR DE TIPO
 ═══════════════════════════════════════════ */
 function TipoSelectorView({onSelect,usuario,onLogout}) {
   return (
@@ -384,28 +465,21 @@ function TipoSelectorView({onSelect,usuario,onLogout}) {
           <button onClick={onLogout} className="text-white/40 hover:text-white/70 text-[10px]">Cerrar sesión</button>
         </div>
       </header>
-
       <div className="flex-1 flex flex-col items-center justify-center p-6">
         <h2 className="text-white font-extrabold text-xl text-center mb-2">¿Qué vas a realizar?</h2>
-        <p className="text-white/40 text-sm text-center mb-10">Selecciona el tipo de trabajo para configurar el informe correctamente</p>
-
+        <p className="text-white/40 text-sm text-center mb-10">Selecciona el tipo de trabajo</p>
         <div className="w-full max-w-sm space-y-4">
-          {/* Verificación */}
           <button onClick={()=>onSelect("verificacion")}
             className="w-full bg-white rounded-2xl p-6 text-left hover:bg-gray-50 active:scale-95 transition-all shadow-xl">
             <div className="flex items-start gap-4">
               <div className="w-12 h-12 rounded-xl flex items-center justify-center text-2xl shrink-0" style={{background:Y+"22"}}>🔍</div>
               <div>
                 <div className="font-extrabold text-gray-900 text-base mb-1">Verificación Eléctrica</div>
-                <div className="text-xs text-gray-500 leading-relaxed">
-                  Inspección con resultado: <b>Aprobada</b>, <b>Condicionada</b> o <b>Rechazada</b>. Incluye plazo para mejoras.
-                </div>
+                <div className="text-xs text-gray-500 leading-relaxed">Resultado: <b>Aprobada</b>, <b>Condicionada</b> o <b>Rechazada</b>. Incluye plazo de mejoras.</div>
                 <div className="mt-2 text-[10px] font-bold uppercase tracking-wider" style={{color:Y}}>RTCR 458:2011 · NEC 2020</div>
               </div>
             </div>
           </button>
-
-          {/* Inspección */}
           <button onClick={()=>onSelect("inspeccion")}
             className="w-full rounded-2xl p-6 text-left hover:opacity-90 active:scale-95 transition-all shadow-xl border-2"
             style={{background:DARK,borderColor:Y+"60"}}>
@@ -413,17 +487,12 @@ function TipoSelectorView({onSelect,usuario,onLogout}) {
               <div className="w-12 h-12 rounded-xl flex items-center justify-center text-2xl shrink-0" style={{background:Y+"30"}}>⚡</div>
               <div>
                 <div className="font-extrabold text-white text-base mb-1">Inspección Eléctrica</div>
-                <div className="text-xs text-white/60 leading-relaxed">
-                  Inspección con resultado: <b className="text-white/80">Aprobada</b> o <b className="text-white/80">No Aprobada</b>. Sin plazo de mejoras.
-                </div>
+                <div className="text-xs text-white/60 leading-relaxed">Resultado: <b className="text-white/80">Aprobada</b> o <b className="text-white/80">No Aprobada</b>. Sin plazo de mejoras.</div>
                 <div className="mt-2 text-[10px] font-bold uppercase tracking-wider" style={{color:Y}}>NEC 2020</div>
               </div>
             </div>
           </button>
-
-          {/* Ver informes existentes */}
-          <button onClick={()=>onSelect("home")}
-            className="w-full py-3 rounded-xl font-bold text-sm text-white/50 hover:text-white/80 transition-colors">
+          <button onClick={()=>onSelect("home")} className="w-full py-3 rounded-xl font-bold text-sm text-white/50 hover:text-white/80 transition-colors">
             📋 Ver informes existentes
           </button>
         </div>
@@ -441,37 +510,18 @@ function AnnotationEditor({imageUrl,onConfirm,onClose}) {
   const [shapes,setShapes]=useState([]);const [drawing,setDraw]=useState(false);
   const [startPt,setStart]=useState(null);const [curPt,setCur]=useState(null);
   const [loaded,setLoaded]=useState(false);const [textDlg,setTDlg]=useState(null);const [textVal,setTVal]=useState("");
-
   useEffect(()=>{const img=imgRef.current;img.onload=()=>{const c=canvasRef.current;if(!c)return;c.width=img.naturalWidth;c.height=img.naturalHeight;setLoaded(true);};img.src=imageUrl;},[imageUrl]);
-
-  const getPos=useCallback((e)=>{
-    const c=canvasRef.current;if(!c)return{x:0,y:0};const r=c.getBoundingClientRect();const sx=c.width/r.width,sy=c.height/r.height;
-    let cx,cy;if(e.touches?.length){cx=e.touches[0].clientX;cy=e.touches[0].clientY;}else if(e.changedTouches?.length){cx=e.changedTouches[0].clientX;cy=e.changedTouches[0].clientY;}else{cx=e.clientX;cy=e.clientY;}
-    return{x:(cx-r.left)*sx,y:(cy-r.top)*sy};
-  },[]);
-
-  const drawOne=useCallback((ctx,s)=>{
-    ctx.save();ctx.strokeStyle=s.color;ctx.fillStyle=s.color;ctx.lineWidth=4;ctx.lineCap="round";ctx.lineJoin="round";
-    if(s.tool==="arrow"){const dx=s.x2-s.x1,dy=s.y2-s.y1,len=Math.sqrt(dx*dx+dy*dy);if(len<6){ctx.restore();return;}const ang=Math.atan2(dy,dx),hl=Math.min(26,len*0.36);ctx.beginPath();ctx.moveTo(s.x1,s.y1);ctx.lineTo(s.x2,s.y2);ctx.stroke();ctx.beginPath();ctx.moveTo(s.x2,s.y2);ctx.lineTo(s.x2-hl*Math.cos(ang-Math.PI/6),s.y2-hl*Math.sin(ang-Math.PI/6));ctx.lineTo(s.x2-hl*Math.cos(ang+Math.PI/6),s.y2-hl*Math.sin(ang+Math.PI/6));ctx.closePath();ctx.fill();}
-    else if(s.tool==="circle"){const rx=Math.abs(s.x2-s.x1)/2,ry=Math.abs(s.y2-s.y1)/2;ctx.beginPath();ctx.ellipse((s.x1+s.x2)/2,(s.y1+s.y2)/2,Math.max(rx,4),Math.max(ry,4),0,0,2*Math.PI);ctx.stroke();}
-    else if(s.tool==="rect"){ctx.beginPath();ctx.rect(s.x1,s.y1,s.x2-s.x1,s.y2-s.y1);ctx.stroke();}
-    else if(s.tool==="cross"){const sz=24;ctx.lineWidth=5;ctx.beginPath();ctx.moveTo(s.x1-sz,s.y1-sz);ctx.lineTo(s.x1+sz,s.y1+sz);ctx.moveTo(s.x1+sz,s.y1-sz);ctx.lineTo(s.x1-sz,s.y1+sz);ctx.stroke();}
-    else if(s.tool==="text"){const fs=Math.max(18,Math.round((canvasRef.current?.width||900)/20));ctx.font=`bold ${fs}px sans-serif`;ctx.strokeStyle="rgba(0,0,0,0.6)";ctx.lineWidth=3;ctx.strokeText(s.text,s.x1,s.y1);ctx.fillStyle=s.color;ctx.fillText(s.text,s.x1,s.y1);}
-    ctx.restore();
-  },[]);
-
+  const getPos=useCallback((e)=>{const c=canvasRef.current;if(!c)return{x:0,y:0};const r=c.getBoundingClientRect();const sx=c.width/r.width,sy=c.height/r.height;let cx,cy;if(e.touches?.length){cx=e.touches[0].clientX;cy=e.touches[0].clientY;}else if(e.changedTouches?.length){cx=e.changedTouches[0].clientX;cy=e.changedTouches[0].clientY;}else{cx=e.clientX;cy=e.clientY;}return{x:(cx-r.left)*sx,y:(cy-r.top)*sy};},[]);
+  const drawOne=useCallback((ctx,s)=>{ctx.save();ctx.strokeStyle=s.color;ctx.fillStyle=s.color;ctx.lineWidth=4;ctx.lineCap="round";ctx.lineJoin="round";if(s.tool==="arrow"){const dx=s.x2-s.x1,dy=s.y2-s.y1,len=Math.sqrt(dx*dx+dy*dy);if(len<6){ctx.restore();return;}const ang=Math.atan2(dy,dx),hl=Math.min(26,len*0.36);ctx.beginPath();ctx.moveTo(s.x1,s.y1);ctx.lineTo(s.x2,s.y2);ctx.stroke();ctx.beginPath();ctx.moveTo(s.x2,s.y2);ctx.lineTo(s.x2-hl*Math.cos(ang-Math.PI/6),s.y2-hl*Math.sin(ang-Math.PI/6));ctx.lineTo(s.x2-hl*Math.cos(ang+Math.PI/6),s.y2-hl*Math.sin(ang+Math.PI/6));ctx.closePath();ctx.fill();}else if(s.tool==="circle"){const rx=Math.abs(s.x2-s.x1)/2,ry=Math.abs(s.y2-s.y1)/2;ctx.beginPath();ctx.ellipse((s.x1+s.x2)/2,(s.y1+s.y2)/2,Math.max(rx,4),Math.max(ry,4),0,0,2*Math.PI);ctx.stroke();}else if(s.tool==="rect"){ctx.beginPath();ctx.rect(s.x1,s.y1,s.x2-s.x1,s.y2-s.y1);ctx.stroke();}else if(s.tool==="cross"){const sz=24;ctx.lineWidth=5;ctx.beginPath();ctx.moveTo(s.x1-sz,s.y1-sz);ctx.lineTo(s.x1+sz,s.y1+sz);ctx.moveTo(s.x1+sz,s.y1-sz);ctx.lineTo(s.x1-sz,s.y1+sz);ctx.stroke();}else if(s.tool==="text"){const fs=Math.max(18,Math.round((canvasRef.current?.width||900)/20));ctx.font=`bold ${fs}px sans-serif`;ctx.strokeStyle="rgba(0,0,0,0.6)";ctx.lineWidth=3;ctx.strokeText(s.text,s.x1,s.y1);ctx.fillStyle=s.color;ctx.fillText(s.text,s.x1,s.y1);}ctx.restore();},[]);
   const redraw=useCallback(()=>{const c=canvasRef.current;if(!c||!loaded)return;const ctx=c.getContext("2d");ctx.clearRect(0,0,c.width,c.height);ctx.drawImage(imgRef.current,0,0,c.width,c.height);shapes.forEach(s=>drawOne(ctx,s));if(drawing&&startPt&&curPt&&tool!=="text"&&tool!=="cross")drawOne(ctx,{tool,color,x1:startPt.x,y1:startPt.y,x2:curPt.x,y2:curPt.y});},[loaded,shapes,drawing,startPt,curPt,tool,color,drawOne]);
   useEffect(()=>{redraw();},[redraw]);
-
   const onDown=useCallback((e)=>{if(e.cancelable)e.preventDefault();const pos=getPos(e);if(tool==="cross"){setShapes(p=>[...p,{tool:"cross",color,x1:pos.x,y1:pos.y}]);return;}if(tool==="text"){setTDlg(pos);setTVal("");return;}setDraw(true);setStart(pos);setCur(pos);},[tool,color,getPos]);
   const onMove=useCallback((e)=>{if(!drawing)return;if(e.cancelable)e.preventDefault();setCur(getPos(e));},[drawing,getPos]);
   const onUp=useCallback((e)=>{if(!drawing||!startPt)return;if(e.cancelable)e.preventDefault();const end=curPt||getPos(e);setShapes(p=>[...p,{tool,color,x1:startPt.x,y1:startPt.y,x2:end.x,y2:end.y}]);setDraw(false);setStart(null);setCur(null);},[drawing,startPt,curPt,tool,color,getPos]);
   const addText=()=>{if(textVal.trim()&&textDlg)setShapes(p=>[...p,{tool:"text",color,x1:textDlg.x,y1:textDlg.y,text:textVal.trim()}]);setTDlg(null);setTVal("");};
   const doConfirm=()=>{const c=canvasRef.current;if(!c)return;const dUrl=c.toDataURL("image/jpeg",0.88);onConfirm(dUrl,dUrl.split(",")[1]);};
-
   const TOOLS=[{id:"arrow",icon:"↗",L:"Flecha"},{id:"circle",icon:"○",L:"Círculo"},{id:"rect",icon:"□",L:"Rect."},{id:"cross",icon:"✕",L:"Cruz"},{id:"text",icon:"T",L:"Texto"}];
   const COLS=["#ef4444","#F5A800","#ffffff","#22c55e","#3b82f6","#000000"];
-
   return (
     <div className="fixed inset-0 z-50 bg-black flex flex-col select-none">
       <div className="flex items-center justify-between px-3 py-2.5 shrink-0" style={{background:DARK}}>
@@ -521,35 +571,20 @@ function AnnotationEditor({imageUrl,onConfirm,onClose}) {
    FINALIZAR MODAL
 ═══════════════════════════════════════════ */
 function FinalizarModal({informe,onConfirm,onClose}) {
-  const tipo   = informe.tipo || "verificacion";
-  const ress   = tipo==="inspeccion" ? RESULTADOS_INSPECCION : RESULTADOS_VERIFICACION;
-  const alta   = (informe.elementos||[]).filter(e=>e.prioridad==="alta").length;
-  const normal = (informe.elementos||[]).filter(e=>e.prioridad==="normal").length;
-  const baja   = (informe.elementos||[]).filter(e=>e.prioridad==="baja").length;
-  const total  = informe.elementos?.length||0;
-  const suggested = tipo==="inspeccion"
-    ? (alta>0?"No Aprobada":"Aprobada")
-    : (alta>0?"Rechazada":normal>0?"Condicionada":"Aprobada");
-
-  const [resultado,setRes] = useState(informe.resultado||suggested);
-  const [plazo,setPlazo]   = useState(informe.plazo||"12 meses");
-  const [notas,setNotas]   = useState(informe.notas||"");
-  const [saving,setSaving] = useState(false);
-
-  const RES_CONFIG = {
-    "Aprobada"    :{color:"#16a34a",bg:"#f0fdf4",desc:"Instalación cumple con los requisitos normativos."},
-    "Condicionada":{color:Y,        bg:"#fffbeb",desc:"Requiere correcciones en el plazo establecido."},
-    "Rechazada"   :{color:"#dc2626",bg:"#fef2f2",desc:"No conformidades críticas que impiden la aprobación."},
-    "No Aprobada" :{color:"#dc2626",bg:"#fef2f2",desc:"La instalación no cumple con los requisitos normativos."},
-  };
-
+  const tipo=informe.tipo||"verificacion";
+  const ress=tipo==="inspeccion"?RESULTADOS_INSPECCION:RESULTADOS_VERIFICACION;
+  const alta=(informe.elementos||[]).filter(e=>e.prioridad==="alta").length;
+  const normal=(informe.elementos||[]).filter(e=>e.prioridad==="normal").length;
+  const baja=(informe.elementos||[]).filter(e=>e.prioridad==="baja").length;
+  const total=informe.elementos?.length||0;
+  const suggested=tipo==="inspeccion"?(alta>0?"No Aprobada":"Aprobada"):(alta>0?"Rechazada":normal>0?"Condicionada":"Aprobada");
+  const [resultado,setRes]=useState(informe.resultado||suggested);
+  const [plazo,setPlazo]=useState(informe.plazo||"12 meses");
+  const [notas,setNotas]=useState(informe.notas||"");
+  const [saving,setSaving]=useState(false);
+  const RES_CONFIG={"Aprobada":{color:"#16a34a",bg:"#f0fdf4",desc:"Instalación cumple con los requisitos normativos."},"Condicionada":{color:Y,bg:"#fffbeb",desc:"Requiere correcciones en el plazo establecido."},"Rechazada":{color:"#dc2626",bg:"#fef2f2",desc:"No conformidades críticas que impiden la aprobación."},"No Aprobada":{color:"#dc2626",bg:"#fef2f2",desc:"La instalación no cumple con los requisitos normativos."}};
   const cfg=RES_CONFIG[resultado]||RES_CONFIG["Aprobada"];
-
-  const handleConfirm=async()=>{
-    setSaving(true);
-    onConfirm({resultado,plazo:tipo==="inspeccion"?"N/A":plazo,notas});
-  };
-
+  const handleConfirm=async()=>{setSaving(true);onConfirm({resultado,plazo:tipo==="inspeccion"?"N/A":plazo,notas});};
   return (
     <div className="fixed inset-0 bg-black/80 z-50 flex flex-col justify-end sm:justify-center sm:items-center sm:p-4">
       <div className="bg-white w-full sm:max-w-lg rounded-t-3xl sm:rounded-3xl overflow-hidden flex flex-col" style={{maxHeight:"95vh"}}>
@@ -561,7 +596,6 @@ function FinalizarModal({informe,onConfirm,onClose}) {
           <p className="text-xs text-gray-400">Código: <span className="font-mono font-bold text-gray-600">{informe.codigo}</span> · {informe.propietario}</p>
         </div>
         <div className="overflow-y-auto p-5 space-y-5 pb-6">
-          {/* Resumen */}
           <div className="rounded-2xl border-2 border-gray-100 overflow-hidden">
             <div className="px-4 py-2 bg-gray-50 border-b border-gray-100"><p className="text-xs font-bold text-gray-500 uppercase tracking-wider">Resumen</p></div>
             <div className="grid grid-cols-4 divide-x divide-gray-100">
@@ -570,12 +604,10 @@ function FinalizarModal({informe,onConfirm,onClose}) {
               ))}
             </div>
           </div>
-          {/* Sugerencia */}
           <div className="flex items-start gap-3 px-4 py-3 rounded-2xl border-2" style={{borderColor:cfg.color+"40",background:cfg.bg}}>
             <span className="text-lg mt-0.5">💡</span>
             <div><p className="text-xs font-bold" style={{color:cfg.color}}>Resultado sugerido: {suggested}</p><p className="text-xs mt-0.5" style={{color:cfg.color+"cc"}}>{cfg.desc}</p></div>
           </div>
-          {/* Selector resultado */}
           <div>
             <label className="block text-xs font-bold text-gray-400 mb-3 uppercase tracking-wider">Resultado *</label>
             <div className="space-y-2.5">
@@ -587,7 +619,6 @@ function FinalizarModal({informe,onConfirm,onClose}) {
               );})}
             </div>
           </div>
-          {/* Plazo solo para verificación */}
           {tipo!=="inspeccion"&&resultado!=="Aprobada"&&(
             <div>
               <label className="block text-xs font-bold text-gray-400 mb-2 uppercase tracking-wider">Plazo para mejoras</label>
@@ -599,7 +630,6 @@ function FinalizarModal({informe,onConfirm,onClose}) {
               <FI label="" value={plazo} onChange={e=>setPlazo(e.target.value)} placeholder="Ej: 12 meses"/>
             </div>
           )}
-          {/* Notas */}
           <div>
             <label className="block text-xs font-bold text-gray-400 mb-2 uppercase tracking-wider">Notas adicionales</label>
             <textarea value={notas} onChange={e=>setNotas(e.target.value)} rows={3} placeholder="Ej: Requiere sistema de iluminación de emergencia en salida principal."
@@ -608,7 +638,7 @@ function FinalizarModal({informe,onConfirm,onClose}) {
           <button onClick={handleConfirm} disabled={saving}
             className="w-full py-4 rounded-2xl font-extrabold text-white text-base hover:opacity-90 active:scale-95 transition-all disabled:opacity-60"
             style={{background:resultado==="Aprobada"?"#16a34a":resultado==="Condicionada"?Y:"#dc2626"}}>
-            {saving?"⏳ Guardando…":`Generar Reporte →`}
+            {saving?"⏳ Guardando…":"Generar Reporte →"}
           </button>
         </div>
       </div>
@@ -617,10 +647,12 @@ function FinalizarModal({informe,onConfirm,onClose}) {
 }
 
 /* ═══════════════════════════════════════════
-   HOME
+   HOME — con botón eliminar
 ═══════════════════════════════════════════ */
 function HomeView({informes,loading,onNew,onOpen,usuario,onLogout}) {
+  const [deleteTarget,setDeleteTarget] = useState(null);
   const sorted=[...informes].sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
+
   return (
     <div className="min-h-screen" style={{background:"#f8f9fb"}}>
       <header style={{background:DARK}} className="px-4 py-4 sticky top-0 z-10 shadow-lg">
@@ -631,6 +663,7 @@ function HomeView({informes,loading,onNew,onOpen,usuario,onLogout}) {
               <div className="text-white text-xs font-bold leading-tight">{usuario.nombre}</div>
               <button onClick={onLogout} className="text-white/40 hover:text-white/70 text-[10px] transition-colors">Cerrar sesión</button>
             </div>
+            <button onClick={onLogout} className="sm:hidden text-white/40 hover:text-white text-xs px-2 py-1 rounded-lg hover:bg-white/10">↩</button>
             <button onClick={onNew} className="flex items-center gap-1.5 px-4 py-2 rounded-xl font-bold text-sm text-gray-900 hover:opacity-90 active:scale-95" style={{background:Y}}>
               <span className="text-base leading-none">+</span> Nuevo
             </button>
@@ -658,27 +691,44 @@ function HomeView({informes,loading,onNew,onOpen,usuario,onLogout}) {
               const alta=(inf.elementos||[]).filter(e=>e.prioridad==="alta").length;
               const tipoLabel=inf.tipo==="inspeccion"?"Inspección":"Verificación";
               return (
-                <div key={inf.id} onClick={()=>onOpen(inf)}
-                  className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 cursor-pointer hover:shadow-md active:bg-gray-50 transition-all">
-                  <div className="flex justify-between gap-3">
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <div className="font-mono text-[11px] text-gray-300 tracking-wider">{inf.codigo}</div>
-                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full border" style={{background:inf.tipo==="inspeccion"?DARK+"15":"#FFF3CD",color:inf.tipo==="inspeccion"?DARK:Y,borderColor:inf.tipo==="inspeccion"?DARK+"30":Y+"60"}}>{tipoLabel}</span>
-                        {!inf.resultado&&<span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-50 text-blue-500 border border-blue-100">En curso</span>}
+                <div key={inf.id} className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+                  {/* Tap area */}
+                  <div onClick={()=>onOpen(inf)} className="p-4 cursor-pointer hover:bg-gray-50 active:bg-gray-100 transition-colors">
+                    <div className="flex justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <div className="font-mono text-[11px] text-gray-300 tracking-wider">{inf.codigo}</div>
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full border"
+                            style={{background:inf.tipo==="inspeccion"?DARK+"15":"#FFF3CD",color:inf.tipo==="inspeccion"?DARK:Y,borderColor:inf.tipo==="inspeccion"?DARK+"30":Y+"60"}}>
+                            {tipoLabel}
+                          </span>
+                          {!inf.resultado&&<span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-50 text-blue-500 border border-blue-100">En curso</span>}
+                        </div>
+                        <div className="font-bold text-gray-800 truncate mt-0.5 text-sm">{inf.propietario||"Sin nombre"}</div>
+                        <div className="text-xs text-gray-400 truncate mt-0.5">{inf.direccion}</div>
                       </div>
-                      <div className="font-bold text-gray-800 truncate mt-0.5 text-sm">{inf.propietario||"Sin nombre"}</div>
-                      <div className="text-xs text-gray-400 truncate mt-0.5">{inf.direccion}</div>
+                      <div className="shrink-0 text-right flex flex-col items-end gap-1.5">
+                        <ResBadge v={inf.resultado}/>
+                        <div className="text-[11px] text-gray-300">{inf.fecha}</div>
+                      </div>
                     </div>
-                    <div className="shrink-0 text-right flex flex-col items-end gap-1.5">
-                      <ResBadge v={inf.resultado}/>
-                      <div className="text-[11px] text-gray-300">{inf.fecha}</div>
+                    <div className="flex items-center gap-4 mt-3 pt-3 border-t border-gray-50 text-xs text-gray-400">
+                      <span>📷 <b className="text-gray-600">{inf.elementos?.length||0}</b> elementos</span>
+                      {alta>0&&<span className="font-bold text-red-400">🔴 {alta} alta prioridad</span>}
                     </div>
                   </div>
-                  <div className="flex items-center gap-4 mt-3 pt-3 border-t border-gray-50 text-xs text-gray-400">
-                    <span>📷 <b className="text-gray-600">{inf.elementos?.length||0}</b> elementos</span>
-                    {alta>0&&<span className="font-bold text-red-400">🔴 {alta} alta prioridad</span>}
-                    <span className="ml-auto text-gray-300">→</span>
+                  {/* Action bar */}
+                  <div className="flex border-t border-gray-50 divide-x divide-gray-50 text-xs">
+                    {inf.resultado && (
+                      <button onClick={()=>generateAndDownloadPDF(inf)}
+                        className="flex-1 py-2.5 text-gray-500 hover:bg-gray-50 font-semibold transition-colors flex items-center justify-center gap-1">
+                        🖨️ PDF
+                      </button>
+                    )}
+                    <button onClick={()=>setDeleteTarget(inf)}
+                      className="flex-1 py-2.5 text-red-400 hover:bg-red-50 font-semibold transition-colors flex items-center justify-center gap-1">
+                      🗑️ Eliminar
+                    </button>
                   </div>
                 </div>
               );
@@ -686,6 +736,13 @@ function HomeView({informes,loading,onNew,onOpen,usuario,onLogout}) {
           </div>
         )}
       </div>
+
+      {deleteTarget && (
+        <DeleteModal
+          informe={deleteTarget}
+          onConfirm={()=>setDeleteTarget(null)}
+          onClose={()=>setDeleteTarget(null)}/>
+      )}
     </div>
   );
 }
@@ -729,8 +786,8 @@ function NuevoView({onCreate,onBack,usuario,tipo}) {
           <span className="text-lg mt-0.5">💡</span>
           <p className="text-xs leading-relaxed" style={{color:"#92400e"}}>
             {tipo==="inspeccion"
-              ? "Resultado: <b>Aprobada</b> o <b>No Aprobada</b>. Se asigna al finalizar la inspección."
-              : "Resultado: <b>Aprobada</b>, <b>Condicionada</b> o <b>Rechazada</b>. Se asigna al finalizar con plazo de mejoras."}
+              ? "Resultado: Aprobada o No Aprobada. Se asigna al finalizar."
+              : "Resultado: Aprobada, Condicionada o Rechazada con plazo de mejoras. Se asigna al finalizar."}
           </p>
         </div>
         <Btn onClick={go} full>Iniciar {tipoLabel} →</Btn>
@@ -742,7 +799,7 @@ function NuevoView({onCreate,onBack,usuario,tipo}) {
 /* ═══════════════════════════════════════════
    INSPECCIÓN / VERIFICACIÓN ACTIVA
 ═══════════════════════════════════════════ */
-function InspeccionView({informe,onUpdate,onBack,onFinalize,onPreview}) {
+function InspeccionView({informe,onUpdate,onBack,onFinalize}) {
   const [modal,setModal]=useState(false);
   const [editIdx,setEditIdx]=useState(null);
   const [finalM,setFinalM]=useState(false);
@@ -755,30 +812,20 @@ function InspeccionView({informe,onUpdate,onBack,onFinalize,onPreview}) {
     if(editIdx!==null)els[editIdx]={...el,num:editIdx+1};
     else els.push({...el,num:els.length+1});
     const updated={...informe,elementos:els};
-    setSyncing(true);
-    await saveInformeFS(updated);
-    setSyncing(false);
-    onUpdate(updated);
-    setModal(false);
+    setSyncing(true);await saveInformeFS(updated);setSyncing(false);
+    onUpdate(updated);setModal(false);
   };
-
   const delEl=async(i)=>{
     if(!confirm("¿Eliminar este elemento?"))return;
     const els=informe.elementos.filter((_,j)=>j!==i).map((e,j)=>({...e,num:j+1}));
     const updated={...informe,elementos:els};
-    await saveInformeFS(updated);
-    onUpdate(updated);
+    await saveInformeFS(updated);onUpdate(updated);
   };
-
   const handleFinalize=async(data)=>{
     const updated={...informe,...data};
-    setSyncing(true);
-    await saveInformeFS(updated);
-    setSyncing(false);
-    onFinalize(updated);
-    setFinalM(false);
+    setSyncing(true);await saveInformeFS(updated);setSyncing(false);
+    onFinalize(updated);setFinalM(false);
   };
-
   const alta=(informe.elementos||[]).filter(e=>e.prioridad==="alta").length;
   const total=informe.elementos?.length||0;
 
@@ -799,7 +846,12 @@ function InspeccionView({informe,onUpdate,onBack,onFinalize,onPreview}) {
             </div>
             <div className="flex items-center gap-2">
               {informe.resultado&&<ResBadge v={informe.resultado}/>}
-              {informe.resultado&&<button onClick={()=>generateAndDownloadPDF(informe)} className="px-3 py-1.5 rounded-xl text-xs font-bold border-2 border-white/20 text-white hover:bg-white/10 transition-colors">🖨️ PDF</button>}
+              {informe.resultado&&(
+                <button onClick={()=>generateAndDownloadPDF(informe)}
+                  className="px-3 py-1.5 rounded-xl text-xs font-bold border-2 border-white/20 text-white hover:bg-white/10 transition-colors">
+                  🖨️ PDF
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -836,8 +888,6 @@ function InspeccionView({informe,onUpdate,onBack,onFinalize,onPreview}) {
             </div>
           ))
         )}
-
-        {/* Finalizar card */}
         <div className={`rounded-2xl border-2 overflow-hidden ${informe.resultado?"border-green-200 bg-green-50":"border-dashed border-gray-200 bg-white"}`}>
           <div className="p-4">
             {informe.resultado?(
@@ -846,16 +896,16 @@ function InspeccionView({informe,onUpdate,onBack,onFinalize,onPreview}) {
                   <p className="font-bold text-green-700 text-sm">✅ {tipoLabel} finalizada</p>
                   <ResBadge v={informe.resultado}/>
                 </div>
-                {informe.tipo!=="inspeccion"&&<p className="text-xs text-green-600 mb-3">Plazo: {informe.plazo}</p>}
+                {tipo!=="inspeccion"&&<p className="text-xs text-green-600 mb-3">Plazo: {informe.plazo}</p>}
                 <div className="flex gap-2">
                   <button onClick={()=>setFinalM(true)} className="flex-1 py-2.5 rounded-xl text-xs font-bold border-2 border-green-200 text-green-700 hover:bg-green-100 transition-colors">✏️ Editar resultado</button>
-                  <button onClick={()=>generateAndDownloadPDF(informe)} className="flex-1 py-2.5 rounded-xl text-xs font-bold text-white hover:opacity-90 transition-opacity" style={{background:DARK}}>🖨️ Generar PDF</button>
+                  <button onClick={()=>generateAndDownloadPDF(informe)} className="flex-1 py-2.5 rounded-xl text-xs font-bold text-white hover:opacity-90" style={{background:DARK}}>🖨️ Generar PDF</button>
                 </div>
               </div>
             ):(
               <div>
                 <p className="font-bold text-gray-500 text-sm mb-1">¿Terminaste de fotografiar?</p>
-                <p className="text-xs text-gray-400 mb-4">Al finalizar se asignará el resultado y el informe quedará disponible en todos los dispositivos.</p>
+                <p className="text-xs text-gray-400 mb-4">Al finalizar se asignará el resultado y quedará disponible en todos los dispositivos.</p>
                 <button onClick={()=>{if(total===0){alert("Agrega al menos un elemento antes de finalizar.");return;}setFinalM(true);}}
                   className="w-full py-3.5 rounded-xl font-extrabold text-white text-sm hover:opacity-90 active:scale-95 transition-all" style={{background:DARK}}>
                   🏁 Finalizar {tipoLabel} y Asignar Resultado
@@ -865,11 +915,9 @@ function InspeccionView({informe,onUpdate,onBack,onFinalize,onPreview}) {
           </div>
         </div>
       </div>
-
       <button onClick={()=>{setEditIdx(null);setModal(true);}}
         className="fixed bottom-6 right-6 w-14 h-14 rounded-2xl shadow-2xl text-white text-3xl flex items-center justify-center z-20 active:scale-90 hover:opacity-90 transition-all"
         style={{background:Y}}>+</button>
-
       {modal&&<ElementoModal el={editIdx!==null?informe.elementos[editIdx]:null} num={editIdx!==null?editIdx+1:(informe.elementos?.length||0)+1} onSave={saveEl} onClose={()=>setModal(false)}/>}
       {finalM&&<FinalizarModal informe={informe} onConfirm={handleFinalize} onClose={()=>setFinalM(false)}/>}
     </div>
@@ -891,20 +939,20 @@ function ElementoModal({el,num,onSave,onClose}) {
   const [annot,setAnn]=useState(null);
   const fRef=useRef();
 
-  const onPhoto=async(e)=>{const f=e.target.files[0];if(!f)return;setErr(null);try{const{url:u,b64:b}=await processPhoto(f);setUrl(u);setB64(b);setAnn(u);}catch{setErr("Error al procesar la imagen.");}};
+  const onPhoto=async(e)=>{
+    const f=e.target.files[0];if(!f)return;setErr(null);
+    try{const{url:u,b64:b}=await processPhoto(f);setUrl(u);setB64(b);setAnn(u);}
+    catch{setErr("Error al procesar la imagen.");}
+  };
   const onAnnotConfirm=(finalUrl,finalB64)=>{setUrl(finalUrl);setB64(finalB64);setAnn(null);if(titulo.trim())analyze(finalB64);else setErr("Foto guardada. Escribe el título y toca IA NEC.");};
-
   const analyze=async(b=b64)=>{
     if(!b){setErr("Primero adjunta una fotografía.");return;}
     if(!titulo.trim()){setErr("Escribe el título antes de analizar.");return;}
     setBusy(true);setErr(null);
-    try{
-      const r=await callAI(b,titulo.trim());
-      setH(r.hallazgos||[]);setA(r.acciones||[]);
-    }catch(e){setErr("Error IA: "+e.message);}
+    try{const r=await callAI(b,titulo.trim());setH(r.hallazgos||[]);setA(r.acciones||[]);}
+    catch(e){setErr("Error IA: "+e.message);}
     finally{setBusy(false);}
   };
-
   const save=()=>{
     if(!titulo.trim()){setErr("El título del elemento es requerido.");return;}
     onSave({titulo:titulo.trim(),url,b64,hallazgos:H,acciones:A,prioridad:prio,num});
@@ -967,7 +1015,6 @@ export default function App() {
   const [loading, setLoad] = useState(true);
   const [active,  setAct]  = useState(null);
 
-  /* Firebase real-time */
   useEffect(()=>{
     if(!usuario){setLoad(false);return;}
     const q=query(collection(db,"informes"),orderBy("createdAt","desc"));
@@ -982,29 +1029,15 @@ export default function App() {
 
   const login=(u)=>{lsto.set("e_usr",u);setUsr(u);setV("selector");};
   const logout=()=>{lsto.set("e_usr",null);setUsr(null);setV("login");};
-
-  const create=async(data)=>{
-    await saveInformeFS(data);
-    setAct(data);setV("insp");
-  };
-  const update=(inf)=>{
-    setI(prev=>prev.map(i=>String(i.id)===String(inf.id)?inf:i));
-    setAct(inf);
-  };
+  const create=async(data)=>{await saveInformeFS(data);setAct(data);setV("insp");};
+  const update=(inf)=>{setI(prev=>prev.map(i=>String(i.id)===String(inf.id)?inf:i));setAct(inf);};
   const open=(inf)=>{setAct(inf);setV("insp");};
-  const finalize=(inf)=>{
-    setI(prev=>prev.map(i=>String(i.id)===String(inf.id)?inf:i));
-    setAct(inf);setV("home");
-  };
-
-  const handleTipoSelect=(t)=>{
-    if(t==="home"){setV("home");return;}
-    setTipo(t);setV("nuevo");
-  };
+  const finalize=(inf)=>{setI(prev=>prev.map(i=>String(i.id)===String(inf.id)?inf:i));setAct(inf);setV("home");};
+  const handleTipoSelect=(t)=>{if(t==="home"){setV("home");return;}setTipo(t);setV("nuevo");};
 
   if(view==="login")    return <LoginView onLogin={login}/>;
   if(view==="selector") return <TipoSelectorView onSelect={handleTipoSelect} usuario={usuario} onLogout={logout}/>;
   if(view==="home")     return <HomeView informes={informes} loading={loading} onNew={()=>setV("selector")} onOpen={open} usuario={usuario} onLogout={logout}/>;
   if(view==="nuevo")    return <NuevoView onCreate={create} onBack={()=>setV("selector")} usuario={usuario} tipo={tipoNuevo}/>;
-  if(view==="insp")     return <InspeccionView informe={active} onUpdate={update} onBack={()=>setV("home")} onFinalize={finalize} onPreview={()=>{}}/>;
+  if(view==="insp")     return <InspeccionView informe={active} onUpdate={update} onBack={()=>setV("home")} onFinalize={finalize}/>;
 }
