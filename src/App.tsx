@@ -1,30 +1,10 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { initializeApp } from "firebase/app";
 import {
-  getFirestore, collection, doc, setDoc, onSnapshot,
-  query, orderBy, deleteDoc, serverTimestamp,
+  getFirestore, collection, doc, setDoc,
+  onSnapshot, query, orderBy, deleteDoc, serverTimestamp,
 } from "firebase/firestore";
-import {
-  getStorage, ref, uploadString, getDownloadURL, deleteObject,
-} from "firebase/storage";
-import { LOGO_ICON, LOGO_FULL } from "./logos";
 
-const Logo = ({ sm, white }) => (
-  <div className="flex items-center gap-2">
-    <img
-      src={LOGO_ICON}
-      alt="Electrizar"
-      className={`${sm ? "w-7 h-7" : "w-10 h-10"} rounded-md object-contain flex-shrink-0`}
-      style={{ background: "#F5A800" }}
-    />
-    <img
-      src={LOGO_FULL}
-      alt="Electrizar Electromecánica"
-      className={`${sm ? "h-7" : "h-9"} object-contain`}
-      style={{ filter: white ? "brightness(10)" : "none" }}
-    />
-  </div>
-);
 /* ═══════════════════════════════════════════
    FIREBASE
 ═══════════════════════════════════════════ */
@@ -36,35 +16,14 @@ const firebaseConfig = {
   messagingSenderId: "664280211024",
   appId: "1:664280211024:web:41da18e05445ab15af3b55",
 };
-const fbApp  = initializeApp(firebaseConfig);
-const db      = getFirestore(fbApp);
-const storage = getStorage(fbApp);
+const fbApp = initializeApp(firebaseConfig);
+const db    = getFirestore(fbApp);
 
-/* ── Firestore helpers ── */
 const saveInformeFS = async (informe) => {
-  const data = {
+  await setDoc(doc(db, "informes", String(informe.id)), {
     ...informe,
     updatedAt: serverTimestamp(),
-  };
-  await setDoc(doc(db, "informes", String(informe.id)), data);
-};
-
-const deleteInformeFS = async (id) => {
-  await deleteDoc(doc(db, "informes", String(id)));
-};
-
-/* ── Storage helpers ── */
-const uploadPhoto = async (informeId, elementoNum, dataUrl) => {
-  if (!dataUrl) return null;
-  try {
-    const path = `informes/${informeId}/foto_${String(elementoNum).padStart(2,"0")}.jpg`;
-    const r = ref(storage, path);
-    await uploadString(r, dataUrl, "data_url");
-    return await getDownloadURL(r);
-  } catch (e) {
-    console.warn("Storage upload error:", e);
-    return dataUrl; // fallback: keep local
-  }
+  });
 };
 
 /* ═══════════════════════════════════════════
@@ -88,11 +47,15 @@ const CO   = {
   dir:    "Calle Blancos, Goicoechea, San José, Costa Rica.",
 };
 const PRIOS = [
-  { v:"alta",   L:"Alta",   c:"#dc2626", tw:"bg-red-50 text-red-700 border-red-200"   },
+  { v:"alta",   L:"Alta",   c:"#dc2626", tw:"bg-red-50 text-red-700 border-red-200"       },
   { v:"normal", L:"Normal", c:Y,         tw:"bg-amber-50 text-amber-700 border-amber-200" },
   { v:"baja",   L:"Baja",   c:"#16a34a", tw:"bg-green-50 text-green-700 border-green-200" },
 ];
-const RESS  = ["Aprobada","Condicionada","Rechazada"];
+
+// Resultados según tipo de informe
+const RESULTADOS_VERIFICACION = ["Aprobada","Condicionada","Rechazada"];
+const RESULTADOS_INSPECCION   = ["Aprobada","No Aprobada"];
+
 const HOY   = new Date().toISOString().split("T")[0];
 const MESES = ["enero","febrero","marzo","abril","mayo","junio","julio","agosto","septiembre","octubre","noviembre","diciembre"];
 
@@ -107,9 +70,9 @@ const lsto = {
 const processPhoto = (file) =>
   new Promise((res, rej) => {
     const img = new Image();
-    const u = URL.createObjectURL(file);
+    const u   = URL.createObjectURL(file);
     img.onload = () => {
-      const max = 800;
+      const max = 900;
       let w = img.width, h = img.height;
       if (w > max) { h = Math.round(h * max / w); w = max; }
       if (h > max) { w = Math.round(w * max / h); h = max; }
@@ -117,24 +80,180 @@ const processPhoto = (file) =>
       c.width = w; c.height = h;
       c.getContext("2d").drawImage(img, 0, 0, w, h);
       URL.revokeObjectURL(u);
-      const dUrl = c.toDataURL("image/jpeg", 0.65);
+      const dUrl = c.toDataURL("image/jpeg", 0.72);
       res({ url: dUrl, b64: dUrl.split(",")[1] });
     };
     img.onerror = rej;
     img.src = u;
   });
 
-  const callAI = async (b64, titulo) => {
-    const r = await fetch("/api/analyze", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ b64, titulo }),
-    });
-    const d = await r.json();
-    if (d.error) throw new Error(d.error);
-    if (!d.hallazgos) throw new Error("Respuesta inesperada de la IA");
-    return d;
+/* ── FIXED callAI: sends b64 + titulo to proxy ── */
+const callAI = async (b64, titulo) => {
+  const r = await fetch("/api/analyze", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ b64, titulo }),
+  });
+  const d = await r.json();
+  if (d.error) throw new Error(d.error);
+  if (!Array.isArray(d.hallazgos)) throw new Error("Respuesta inesperada de la IA");
+  return d;
+};
+
+/* ── PDF generation using browser print with blob ── */
+const generateAndDownloadPDF = (informe) => {
+  const nEl   = informe.elementos?.length || 0;
+  const total = nEl + 2;
+
+  const pageStyle = `
+    body { font-family: Arial, sans-serif; margin: 0; padding: 0; background: white; }
+    .page { page-break-after: always; padding: 20px 25px; min-height: 270mm;
+            display: flex; flex-direction: column; border-bottom: 1px solid #eee; }
+    .page:last-child { page-break-after: avoid; }
+    .header { display: flex; justify-content: space-between; align-items: flex-start;
+              border-bottom: 2px solid #eee; padding-bottom: 10px; margin-bottom: 8px; }
+    .company-info { text-align: right; font-size: 9px; color: #555; line-height: 1.5; }
+    .footer { display: flex; justify-content: space-between; align-items: center;
+              border-top: 2px solid #eee; margin-top: auto; padding-top: 10px; font-size: 9px; color: #888; }
+    .logo-box { background: #F5A800; width: 28px; height: 28px; display: inline-flex;
+                align-items: center; justify-content: center; border-radius: 4px; }
+    .logo-row { display: flex; align-items: center; gap: 8px; }
+    .logo-text { font-size: 11px; font-weight: bold; }
+    .logo-sub  { font-size: 8px; color: #F5A800; }
+    .badge { font-size: 9px; font-weight: bold; padding: 2px 8px; border-radius: 20px; border: 1px solid; display: inline-block; }
+    .badge-alta   { background: #fef2f2; color: #dc2626; border-color: #fecaca; }
+    .badge-normal { background: #fffbeb; color: #d97706; border-color: #fde68a; }
+    .badge-baja   { background: #f0fdf4; color: #16a34a; border-color: #bbf7d0; }
+    .el-row { display: flex; gap: 20px; }
+    .el-img { width: 200px; height: 180px; object-fit: cover; border-radius: 8px; border: 1px solid #ddd; flex-shrink: 0; }
+    .el-img-empty { width: 200px; height: 180px; background: #f3f4f6; border-radius: 8px; flex-shrink: 0;
+                    display: flex; align-items: center; justify-content: center; font-size: 32px; }
+    h1 { font-size: 20px; font-weight: 900; margin: 0 0 8px; }
+    h2 { font-size: 15px; font-weight: 900; margin: 0 0 12px; }
+    p  { font-size: 11px; color: #555; line-height: 1.6; margin: 0 0 6px; }
+    .label { font-weight: bold; font-size: 11px; }
+    .num   { font-size: 9px; color: #aaa; text-align: right; margin-top: 6px; }
+    .cover-center { display: flex; flex-direction: column; align-items: center; text-align: center; padding: 40px 0; }
+    .cover-icon { width: 80px; height: 80px; background: #FFF3CD; border-radius: 16px;
+                  display: flex; align-items: center; justify-content: center; font-size: 40px; margin-bottom: 20px; }
+    .info-table { text-align: left; width: 280px; }
+    .info-table div { margin-bottom: 5px; font-size: 12px; }
+    .sig-line { border-bottom: 2px solid #ccc; width: 200px; margin-bottom: 6px; margin-top: 60px; }
+    @media print {
+      body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    }
+  `;
+
+  const logoSVG = `<div class="logo-box"><svg viewBox="0 0 22 22" width="16" height="16" fill="white"><rect x="2" y="2" width="18" height="3"/><rect x="2" y="8.5" width="11" height="3"/><rect x="2" y="15" width="18" height="3"/><polygon points="14,8.5 18,8.5 15,12.5 19,12.5 12,20 13,13.5 9,13.5"/></svg></div>`;
+
+  const logoHTML = `<div class="logo-row">${logoSVG}<div><div class="logo-text">Electrizar</div><div class="logo-sub">Constructora Electromecánica</div></div></div>`;
+
+  const headerHTML = `
+    <div class="header">
+      ${logoHTML}
+      <div class="company-info">
+        <b>Empresa:</b> ${CO.nombre} &nbsp;|&nbsp; <b>N.º de elementos:</b> ${nEl}<br/>
+        <b>Teléfono:</b> ${CO.tel} &nbsp;|&nbsp; <b>Correo:</b> ${CO.correo}<br/>
+        <b>Dirección:</b> ${CO.dir}
+      </div>
+    </div>`;
+
+  const footerHTML = (page) => `
+    <div class="footer">${logoHTML}<span>página ${page} de ${total}</span></div>`;
+
+  const tipoLabel = informe.tipo === "inspeccion" ? "Inspección" : "Verificación";
+  const fmtFechaLocal = (iso) => {
+    if (!iso) return "";
+    const [y,m,d] = iso.split("-");
+    return `${d} de ${MESES[+m-1]} de ${y}`;
   };
+
+  // Portada
+  const portada = `
+    <div class="page">
+      ${headerHTML}
+      <div class="cover-center">
+        <div class="cover-icon">⚡</div>
+        <h1>${informe.codigo} — Informe ${tipoLabel} Eléctrica</h1>
+        <p style="max-width:400px;margin-bottom:24px;">Informe fotográfico con resumen de hallazgos y acciones requeridas para la ${tipoLabel} Eléctrica.</p>
+        <div class="info-table">
+          <div><span class="label">Propietario:</span> ${informe.propietario}</div>
+          <div><span class="label">Dirección:</span> ${informe.direccion}</div>
+          <div><span class="label">Fecha:</span> ${fmtFechaLocal(informe.fecha)}</div>
+          <div><span class="label">Versión:</span> 0.1V</div>
+          ${informe.ingeniero ? `<div><span class="label">Responsable:</span> ${informe.ingeniero}. ${informe.matricula}.</div>` : ""}
+        </div>
+      </div>
+      ${footerHTML(1)}
+    </div>`;
+
+  // Limitaciones
+  const limitaciones = `
+    <div class="page">
+      ${headerHTML}
+      <h2>Análisis y Limitaciones del presente informe fotográfico:</h2>
+      <p>El presente informe fotográfico documenta las no conformidades identificadas durante la verificación visual de las instalaciones eléctricas, conforme al artículo 5.2 del Reglamento de Oficialización del Código Eléctrico de Costa Rica (RTCR 458:2011), Decreto Ejecutivo N.° 36979-MEIC y sus reformas. La evaluación se fundamenta en el Anexo B para condiciones de "Peligro Inminente" o "Alto Riesgo", complementada con las referencias del Código Eléctrico NFPA 70 (NEC), edición 2020.</p>
+      <p>Los hallazgos se sustentan en la evidencia visible al momento de la inspección. Durante la ejecución de reparaciones, toda condición adicional que represente incumplimiento normativo deberá ser corregida, aun cuando no haya sido señalada individualmente en este informe.</p>
+      ${footerHTML(2)}
+    </div>`;
+
+  // Elementos
+  const elementos = (informe.elementos || []).map((el, i) => {
+    const badgeClass = el.prioridad === "alta" ? "badge-alta" : el.prioridad === "baja" ? "badge-baja" : "badge-normal";
+    const badgeLabel = el.prioridad === "alta" ? "Alta" : el.prioridad === "baja" ? "Baja" : "Normal";
+    const hallazgos  = (el.hallazgos || []).map(h => `<p>-${h}</p>`).join("");
+    const acciones   = (el.acciones  || []).map(a => `<p>-${a}</p>`).join("");
+    const imgHTML    = el.url
+      ? `<img class="el-img" src="${el.url}" alt="${el.titulo}"/>`
+      : `<div class="el-img-empty">📷</div>`;
+    return `
+      <div class="page">
+        ${headerHTML}
+        <div class="el-row">
+          ${imgHTML}
+          <div style="flex:1;min-width:0;">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap;">
+              <span class="label">Título: ${el.titulo}</span>
+              <span class="badge ${badgeClass}">${badgeLabel}</span>
+            </div>
+            <p class="label">Hallazgos:</p>${hallazgos}
+            <p class="label" style="margin-top:10px;">Acciones requeridas:</p>${acciones}
+          </div>
+        </div>
+        <div class="num">(${el.num})</div>
+        ${footerHTML(i + 3)}
+      </div>`;
+  }).join("");
+
+  // Cierre
+  const plazoHTML = informe.tipo !== "inspeccion" && informe.plazo
+    ? `<div><span class="label">Plazo para ejecución de mejoras:</span> ${informe.plazo}.</div>` : "";
+  const notasHTML = informe.notas
+    ? `<div style="margin-top:6px;"><span class="label">Notas adicionales:</span><p>${informe.notas}</p></div>` : "";
+
+  const cierre = `
+    <div class="page">
+      ${headerHTML}
+      <h2>Final de Reporte</h2>
+      <div style="font-size:13px;color:#374151;line-height:2;">
+        <div><span class="label">Resultado de ${tipoLabel.toLowerCase()}:</span> ${informe.resultado}.</div>
+        ${plazoHTML}
+        ${notasHTML}
+      </div>
+      ${informe.ingeniero ? `<div class="sig-line"></div><div style="font-size:12px;"><b>${informe.ingeniero}</b><br/>${informe.matricula}</div>` : ""}
+      ${footerHTML(total)}
+    </div>`;
+
+  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${informe.codigo}</title>
+    <style>${pageStyle}</style></head><body>${portada}${limitaciones}${elementos}${cierre}</body></html>`;
+
+  // Open in new tab → print/save as PDF
+  const w = window.open("", "_blank");
+  if (!w) { alert("Permite ventanas emergentes para generar el PDF."); return; }
+  w.document.write(html);
+  w.document.close();
+  w.onload = () => { w.focus(); w.print(); };
+};
 
 const fmtFecha = (iso) => {
   if (!iso) return "";
@@ -163,33 +282,41 @@ const Logo = ({ sm, white }) => (
 );
 
 const Badge = ({v}) => { const p=PRIOS.find(x=>x.v===v)||PRIOS[1]; return <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${p.tw}`}>{p.L}</span>; };
-const ResBadge = ({v}) => {
+
+const ResBadge = ({v,tipo}) => {
   if (!v) return null;
-  const cfg = v==="Aprobada"?"bg-green-100 text-green-700":v==="Rechazada"?"bg-red-100 text-red-700":"bg-amber-100 text-amber-700";
+  const isOk = v==="Aprobada";
+  const isCond = v==="Condicionada";
+  const cfg = isOk ? "bg-green-100 text-green-700" : isCond ? "bg-amber-100 text-amber-700" : "bg-red-100 text-red-700";
   return <span className={`text-[11px] font-bold px-2.5 py-1 rounded-full ${cfg}`}>{v}</span>;
 };
+
 const Pill = ({children,active,color,onClick}) => (
   <button onClick={onClick}
     className={`flex-1 py-2.5 rounded-xl text-sm font-bold border-2 transition-all ${active?"text-white":"border-gray-200 text-gray-400 bg-white hover:bg-gray-50"}`}
     style={active?{background:color||Y,borderColor:color||Y}:{}}>{children}</button>
 );
+
 const Btn = ({children,onClick,variant="pri",sm,disabled,full,className=""}) => {
   const base=`font-bold rounded-xl transition-all active:scale-95 flex items-center justify-center gap-1.5 ${sm?"px-3 py-2 text-sm":"px-5 py-3"} ${full?"w-full":""} ${className}`;
   if (variant==="pri") return <button onClick={onClick} disabled={disabled} className={`${base} ${disabled?"opacity-50 cursor-not-allowed":"hover:opacity-90"}`} style={{background:disabled?"#9ca3af":Y,color:"white"}}>{children}</button>;
   return <button onClick={onClick} disabled={disabled} className={`${base} border-2 border-gray-200 bg-white text-gray-700 hover:bg-gray-50 ${disabled?"opacity-50":""}`}>{children}</button>;
 };
+
 const Card = ({title,children,accent}) => (
   <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
-    {title && <div className="px-4 pt-4 pb-2 flex items-center gap-2">{accent&&<div className="w-1 h-4 rounded-full" style={{background:Y}}/>}<h3 className="font-bold text-gray-700 text-xs uppercase tracking-widest">{title}</h3></div>}
+    {title&&<div className="px-4 pt-4 pb-2 flex items-center gap-2">{accent&&<div className="w-1 h-4 rounded-full" style={{background:Y}}/>}<h3 className="font-bold text-gray-700 text-xs uppercase tracking-widest">{title}</h3></div>}
     <div className="px-4 pb-4 space-y-3">{children}</div>
   </div>
 );
+
 const FI = ({label,value,onChange,...rest}) => (
   <div>
     <label className="block text-xs font-semibold text-gray-400 mb-1 uppercase tracking-wider">{label}</label>
     <input value={value} onChange={onChange} className="w-full border-2 border-gray-100 rounded-xl px-3 py-2.5 text-sm text-gray-800 bg-gray-50 focus:outline-none focus:border-amber-400 focus:bg-white transition-all" {...rest}/>
   </div>
 );
+
 const ListEditor = ({label,items,set,placeholder}) => (
   <div>
     <div className="flex items-center justify-between mb-2">
@@ -197,7 +324,7 @@ const ListEditor = ({label,items,set,placeholder}) => (
       <button onClick={()=>set([...items,""])} className="text-xs font-bold px-2.5 py-1 rounded-lg hover:opacity-80" style={{color:Y,background:Y+"18"}}>+ Agregar</button>
     </div>
     <div className="space-y-2">
-      {!items.length && <div className="text-xs text-gray-400 text-center py-4 border-2 border-dashed border-gray-100 rounded-xl">Sin {label.toLowerCase()} — usa IA o toca Agregar</div>}
+      {!items.length&&<div className="text-xs text-gray-400 text-center py-4 border-2 border-dashed border-gray-100 rounded-xl">Sin {label.toLowerCase()} — usa IA o toca Agregar</div>}
       {items.map((h,i)=>(
         <div key={i} className="flex gap-2 items-start">
           <textarea value={h} onChange={e=>{const c=[...items];c[i]=e.target.value;set(c);}} rows={2} placeholder={placeholder}
@@ -213,41 +340,29 @@ const ListEditor = ({label,items,set,placeholder}) => (
    LOGIN
 ═══════════════════════════════════════════ */
 function LoginView({onLogin}) {
-  const [user,setUser] = useState("");
-  const [pass,setPass] = useState("");
-  const [err,setErr]   = useState(null);
-  const [show,setShow] = useState(false);
-  const handle = () => {
-    const found = USUARIOS.find(u=>u.user===user.trim()&&u.pass===pass);
-    if (!found) { setErr("Usuario o contraseña incorrectos."); return; }
-    onLogin(found);
-  };
+  const [user,setUser]=useState(""); const [pass,setPass]=useState(""); const [err,setErr]=useState(null); const [show,setShow]=useState(false);
+  const handle=()=>{const found=USUARIOS.find(u=>u.user===user.trim()&&u.pass===pass);if(!found){setErr("Usuario o contraseña incorrectos.");return;}onLogin(found);};
   return (
     <div className="min-h-screen flex flex-col items-center justify-center p-6" style={{background:DARK}}>
       <div className="w-full max-w-sm">
-        <div className="flex justify-center mb-8">
-          <div className="bg-white rounded-3xl p-6 shadow-2xl"><Logo/></div>
-        </div>
+        <div className="flex justify-center mb-8"><div className="bg-white rounded-3xl p-6 shadow-2xl"><Logo/></div></div>
         <h1 className="text-white font-extrabold text-2xl text-center mb-1">Inspecciones Eléctricas</h1>
         <p className="text-white/40 text-sm text-center mb-8">Verificación NEC 2020 · Electrizar</p>
         <div className="space-y-3">
           <div>
             <label className="block text-white/50 text-xs font-bold mb-1.5 uppercase tracking-wider">Usuario</label>
             <input value={user} onChange={e=>{setUser(e.target.value);setErr(null);}} onKeyDown={e=>e.key==="Enter"&&handle()}
-              className="w-full bg-white/10 border-2 border-white/10 rounded-xl px-4 py-3 text-white placeholder-white/30 text-sm focus:outline-none focus:border-amber-400 transition-all"
-              placeholder="amontiel"/>
+              className="w-full bg-white/10 border-2 border-white/10 rounded-xl px-4 py-3 text-white placeholder-white/30 text-sm focus:outline-none focus:border-amber-400 transition-all" placeholder="amontiel"/>
           </div>
           <div>
             <label className="block text-white/50 text-xs font-bold mb-1.5 uppercase tracking-wider">Contraseña</label>
             <div className="relative">
-              <input value={pass} onChange={e=>{setPass(e.target.value);setErr(null);}} onKeyDown={e=>e.key==="Enter"&&handle()}
-                type={show?"text":"password"}
-                className="w-full bg-white/10 border-2 border-white/10 rounded-xl px-4 py-3 text-white placeholder-white/30 text-sm focus:outline-none focus:border-amber-400 transition-all"
-                placeholder="••••••••"/>
+              <input value={pass} onChange={e=>{setPass(e.target.value);setErr(null);}} onKeyDown={e=>e.key==="Enter"&&handle()} type={show?"text":"password"}
+                className="w-full bg-white/10 border-2 border-white/10 rounded-xl px-4 py-3 text-white placeholder-white/30 text-sm focus:outline-none focus:border-amber-400 transition-all" placeholder="••••••••"/>
               <button onClick={()=>setShow(p=>!p)} className="absolute right-3 top-1/2 -translate-y-1/2 text-white/40 hover:text-white/70 text-xs">{show?"Ocultar":"Ver"}</button>
             </div>
           </div>
-          {err && <div className="bg-red-900/40 border border-red-500/40 rounded-xl px-4 py-2.5 text-red-300 text-xs font-medium">⚠️ {err}</div>}
+          {err&&<div className="bg-red-900/40 border border-red-500/40 rounded-xl px-4 py-2.5 text-red-300 text-xs font-medium">⚠️ {err}</div>}
           <button onClick={handle} className="w-full py-3.5 rounded-2xl font-extrabold text-gray-900 text-sm hover:opacity-90 active:scale-95 transition-all mt-2" style={{background:Y}}>Entrar →</button>
         </div>
         <p className="text-white/20 text-xs text-center mt-8">☁️ Sincronizado en todos los dispositivos</p>
@@ -257,24 +372,81 @@ function LoginView({onLogin}) {
 }
 
 /* ═══════════════════════════════════════════
+   SELECTOR DE TIPO (nuevo)
+═══════════════════════════════════════════ */
+function TipoSelectorView({onSelect,usuario,onLogout}) {
+  return (
+    <div className="min-h-screen flex flex-col" style={{background:DARK}}>
+      <header className="px-4 py-4 flex items-center justify-between">
+        <Logo white/>
+        <div className="text-right">
+          <div className="text-white text-xs font-bold">{usuario.nombre}</div>
+          <button onClick={onLogout} className="text-white/40 hover:text-white/70 text-[10px]">Cerrar sesión</button>
+        </div>
+      </header>
+
+      <div className="flex-1 flex flex-col items-center justify-center p-6">
+        <h2 className="text-white font-extrabold text-xl text-center mb-2">¿Qué vas a realizar?</h2>
+        <p className="text-white/40 text-sm text-center mb-10">Selecciona el tipo de trabajo para configurar el informe correctamente</p>
+
+        <div className="w-full max-w-sm space-y-4">
+          {/* Verificación */}
+          <button onClick={()=>onSelect("verificacion")}
+            className="w-full bg-white rounded-2xl p-6 text-left hover:bg-gray-50 active:scale-95 transition-all shadow-xl">
+            <div className="flex items-start gap-4">
+              <div className="w-12 h-12 rounded-xl flex items-center justify-center text-2xl shrink-0" style={{background:Y+"22"}}>🔍</div>
+              <div>
+                <div className="font-extrabold text-gray-900 text-base mb-1">Verificación Eléctrica</div>
+                <div className="text-xs text-gray-500 leading-relaxed">
+                  Inspección con resultado: <b>Aprobada</b>, <b>Condicionada</b> o <b>Rechazada</b>. Incluye plazo para mejoras.
+                </div>
+                <div className="mt-2 text-[10px] font-bold uppercase tracking-wider" style={{color:Y}}>RTCR 458:2011 · NEC 2020</div>
+              </div>
+            </div>
+          </button>
+
+          {/* Inspección */}
+          <button onClick={()=>onSelect("inspeccion")}
+            className="w-full rounded-2xl p-6 text-left hover:opacity-90 active:scale-95 transition-all shadow-xl border-2"
+            style={{background:DARK,borderColor:Y+"60"}}>
+            <div className="flex items-start gap-4">
+              <div className="w-12 h-12 rounded-xl flex items-center justify-center text-2xl shrink-0" style={{background:Y+"30"}}>⚡</div>
+              <div>
+                <div className="font-extrabold text-white text-base mb-1">Inspección Eléctrica</div>
+                <div className="text-xs text-white/60 leading-relaxed">
+                  Inspección con resultado: <b className="text-white/80">Aprobada</b> o <b className="text-white/80">No Aprobada</b>. Sin plazo de mejoras.
+                </div>
+                <div className="mt-2 text-[10px] font-bold uppercase tracking-wider" style={{color:Y}}>NEC 2020</div>
+              </div>
+            </div>
+          </button>
+
+          {/* Ver informes existentes */}
+          <button onClick={()=>onSelect("home")}
+            className="w-full py-3 rounded-xl font-bold text-sm text-white/50 hover:text-white/80 transition-colors">
+            📋 Ver informes existentes
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════
    ANNOTATION EDITOR
 ═══════════════════════════════════════════ */
 function AnnotationEditor({imageUrl,onConfirm,onClose}) {
-  const canvasRef=useRef(null); const imgRef=useRef(new Image());
-  const [tool,setTool]=useState("arrow"); const [color,setColor]=useState("#ef4444");
-  const [shapes,setShapes]=useState([]); const [drawing,setDraw]=useState(false);
-  const [startPt,setStart]=useState(null); const [curPt,setCur]=useState(null);
-  const [loaded,setLoaded]=useState(false); const [textDlg,setTDlg]=useState(null); const [textVal,setTVal]=useState("");
+  const canvasRef=useRef(null);const imgRef=useRef(new Image());
+  const [tool,setTool]=useState("arrow");const [color,setColor]=useState("#ef4444");
+  const [shapes,setShapes]=useState([]);const [drawing,setDraw]=useState(false);
+  const [startPt,setStart]=useState(null);const [curPt,setCur]=useState(null);
+  const [loaded,setLoaded]=useState(false);const [textDlg,setTDlg]=useState(null);const [textVal,setTVal]=useState("");
 
   useEffect(()=>{const img=imgRef.current;img.onload=()=>{const c=canvasRef.current;if(!c)return;c.width=img.naturalWidth;c.height=img.naturalHeight;setLoaded(true);};img.src=imageUrl;},[imageUrl]);
 
   const getPos=useCallback((e)=>{
-    const c=canvasRef.current;if(!c)return{x:0,y:0};
-    const r=c.getBoundingClientRect();const sx=c.width/r.width,sy=c.height/r.height;
-    let cx,cy;
-    if(e.touches?.length){cx=e.touches[0].clientX;cy=e.touches[0].clientY;}
-    else if(e.changedTouches?.length){cx=e.changedTouches[0].clientX;cy=e.changedTouches[0].clientY;}
-    else{cx=e.clientX;cy=e.clientY;}
+    const c=canvasRef.current;if(!c)return{x:0,y:0};const r=c.getBoundingClientRect();const sx=c.width/r.width,sy=c.height/r.height;
+    let cx,cy;if(e.touches?.length){cx=e.touches[0].clientX;cy=e.touches[0].clientY;}else if(e.changedTouches?.length){cx=e.changedTouches[0].clientX;cy=e.changedTouches[0].clientY;}else{cx=e.clientX;cy=e.clientY;}
     return{x:(cx-r.left)*sx,y:(cy-r.top)*sy};
   },[]);
 
@@ -330,9 +502,7 @@ function AnnotationEditor({imageUrl,onConfirm,onClose}) {
           {TOOLS.map(t=>(
             <button key={t.id} onClick={()=>setTool(t.id)}
               className={`flex-1 py-2 rounded-xl flex flex-col items-center gap-0.5 text-xs font-bold border-2 transition-all ${tool===t.id?"border-transparent text-gray-900":"border-white/10 text-white/50 hover:text-white"}`}
-              style={tool===t.id?{background:Y}:{}}>
-              <span className="text-sm leading-none">{t.icon}</span><span className="text-[9px]">{t.L}</span>
-            </button>
+              style={tool===t.id?{background:Y}:{}}><span className="text-sm leading-none">{t.icon}</span><span className="text-[9px]">{t.L}</span></button>
           ))}
           <div className="w-px h-10 bg-white/10 mx-0.5"/>
           <button onClick={()=>setShapes(p=>p.slice(0,-1))} className="px-2.5 py-2 rounded-xl border-2 border-white/10 text-white/50 hover:text-white flex flex-col items-center"><span className="text-sm">↩</span><span className="text-[9px] text-white/40">Undo</span></button>
@@ -341,7 +511,6 @@ function AnnotationEditor({imageUrl,onConfirm,onClose}) {
         <div className="flex items-center justify-center gap-3 pb-1">
           <span className="text-white/30 text-[11px] mr-1">Color:</span>
           {COLS.map(c=><button key={c} onClick={()=>setColor(c)} className="transition-all active:scale-90" style={{width:26,height:26,borderRadius:"50%",background:c,outline:color===c?`3px solid ${Y}`:"3px solid transparent",outlineOffset:2,border:c==="#ffffff"?"2px solid rgba(255,255,255,0.25)":"none"}}/>)}
-          <div className="w-6 h-6 rounded-full ml-1 border-2 border-white/30"><div className="w-full h-full rounded-full" style={{background:color}}/></div>
         </div>
       </div>
     </div>
@@ -352,26 +521,33 @@ function AnnotationEditor({imageUrl,onConfirm,onClose}) {
    FINALIZAR MODAL
 ═══════════════════════════════════════════ */
 function FinalizarModal({informe,onConfirm,onClose}) {
-  const alta  =(informe.elementos||[]).filter(e=>e.prioridad==="alta").length;
-  const normal=(informe.elementos||[]).filter(e=>e.prioridad==="normal").length;
-  const baja  =(informe.elementos||[]).filter(e=>e.prioridad==="baja").length;
-  const total =informe.elementos?.length||0;
-  const suggested=alta>0?"Rechazada":normal>0?"Condicionada":"Aprobada";
-  const [resultado,setRes]=useState(informe.resultado||suggested);
-  const [plazo,setPlazo]=useState(informe.plazo||"12 meses");
-  const [notas,setNotas]=useState(informe.notas||"");
-  const [saving,setSaving]=useState(false);
+  const tipo   = informe.tipo || "verificacion";
+  const ress   = tipo==="inspeccion" ? RESULTADOS_INSPECCION : RESULTADOS_VERIFICACION;
+  const alta   = (informe.elementos||[]).filter(e=>e.prioridad==="alta").length;
+  const normal = (informe.elementos||[]).filter(e=>e.prioridad==="normal").length;
+  const baja   = (informe.elementos||[]).filter(e=>e.prioridad==="baja").length;
+  const total  = informe.elementos?.length||0;
+  const suggested = tipo==="inspeccion"
+    ? (alta>0?"No Aprobada":"Aprobada")
+    : (alta>0?"Rechazada":normal>0?"Condicionada":"Aprobada");
 
-  const RES_CONFIG={
+  const [resultado,setRes] = useState(informe.resultado||suggested);
+  const [plazo,setPlazo]   = useState(informe.plazo||"12 meses");
+  const [notas,setNotas]   = useState(informe.notas||"");
+  const [saving,setSaving] = useState(false);
+
+  const RES_CONFIG = {
     "Aprobada"    :{color:"#16a34a",bg:"#f0fdf4",desc:"Instalación cumple con los requisitos normativos."},
     "Condicionada":{color:Y,        bg:"#fffbeb",desc:"Requiere correcciones en el plazo establecido."},
     "Rechazada"   :{color:"#dc2626",bg:"#fef2f2",desc:"No conformidades críticas que impiden la aprobación."},
+    "No Aprobada" :{color:"#dc2626",bg:"#fef2f2",desc:"La instalación no cumple con los requisitos normativos."},
   };
-  const cfg=RES_CONFIG[resultado];
+
+  const cfg=RES_CONFIG[resultado]||RES_CONFIG["Aprobada"];
 
   const handleConfirm=async()=>{
     setSaving(true);
-    onConfirm({resultado,plazo,notas});
+    onConfirm({resultado,plazo:tipo==="inspeccion"?"N/A":plazo,notas});
   };
 
   return (
@@ -379,7 +555,7 @@ function FinalizarModal({informe,onConfirm,onClose}) {
       <div className="bg-white w-full sm:max-w-lg rounded-t-3xl sm:rounded-3xl overflow-hidden flex flex-col" style={{maxHeight:"95vh"}}>
         <div className="px-5 pt-5 pb-4 border-b border-gray-100">
           <div className="flex items-center justify-between mb-1">
-            <span className="text-lg font-extrabold text-gray-900">🏁 Finalizar Inspección</span>
+            <span className="text-lg font-extrabold text-gray-900">🏁 Finalizar {tipo==="inspeccion"?"Inspección":"Verificación"}</span>
             <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-xl text-gray-300 hover:text-gray-600 hover:bg-gray-100 font-bold text-lg">✕</button>
           </div>
           <p className="text-xs text-gray-400">Código: <span className="font-mono font-bold text-gray-600">{informe.codigo}</span> · {informe.propietario}</p>
@@ -387,7 +563,7 @@ function FinalizarModal({informe,onConfirm,onClose}) {
         <div className="overflow-y-auto p-5 space-y-5 pb-6">
           {/* Resumen */}
           <div className="rounded-2xl border-2 border-gray-100 overflow-hidden">
-            <div className="px-4 py-2 bg-gray-50 border-b border-gray-100"><p className="text-xs font-bold text-gray-500 uppercase tracking-wider">Resumen de la inspección</p></div>
+            <div className="px-4 py-2 bg-gray-50 border-b border-gray-100"><p className="text-xs font-bold text-gray-500 uppercase tracking-wider">Resumen</p></div>
             <div className="grid grid-cols-4 divide-x divide-gray-100">
               {[["Total",total,"text-gray-800"],["Alta",alta,"text-red-500"],["Normal",normal,"text-amber-500"],["Baja",baja,"text-green-500"]].map(([l,n,cl])=>(
                 <div key={l} className="px-3 py-3 text-center"><div className={`text-xl font-extrabold ${cl}`}>{n}</div><div className="text-[10px] text-gray-400 mt-0.5">{l}</div></div>
@@ -399,11 +575,11 @@ function FinalizarModal({informe,onConfirm,onClose}) {
             <span className="text-lg mt-0.5">💡</span>
             <div><p className="text-xs font-bold" style={{color:cfg.color}}>Resultado sugerido: {suggested}</p><p className="text-xs mt-0.5" style={{color:cfg.color+"cc"}}>{cfg.desc}</p></div>
           </div>
-          {/* Selector */}
+          {/* Selector resultado */}
           <div>
-            <label className="block text-xs font-bold text-gray-400 mb-3 uppercase tracking-wider">Resultado de la Verificación *</label>
+            <label className="block text-xs font-bold text-gray-400 mb-3 uppercase tracking-wider">Resultado *</label>
             <div className="space-y-2.5">
-              {RESS.map(r=>{const c=RES_CONFIG[r];const active=resultado===r;return(
+              {ress.map(r=>{const c=RES_CONFIG[r]||RES_CONFIG["Aprobada"];const active=resultado===r;return(
                 <button key={r} onClick={()=>setRes(r)} className="w-full flex items-center gap-3 px-4 py-3.5 rounded-2xl border-2 text-left transition-all" style={{borderColor:active?c.color:"#e5e7eb",background:active?c.bg:"white"}}>
                   <div className="w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0" style={{borderColor:active?c.color:"#d1d5db",background:active?c.color:"white"}}>{active&&<div className="w-2 h-2 rounded-full bg-white"/>}</div>
                   <div className="flex-1"><p className="font-bold text-sm" style={{color:active?c.color:"#374151"}}>{r}</p><p className="text-xs mt-0.5" style={{color:active?c.color+"aa":"#9ca3af"}}>{c.desc}</p></div>
@@ -411,8 +587,8 @@ function FinalizarModal({informe,onConfirm,onClose}) {
               );})}
             </div>
           </div>
-          {/* Plazo */}
-          {resultado!=="Aprobada"&&(
+          {/* Plazo solo para verificación */}
+          {tipo!=="inspeccion"&&resultado!=="Aprobada"&&(
             <div>
               <label className="block text-xs font-bold text-gray-400 mb-2 uppercase tracking-wider">Plazo para mejoras</label>
               <div className="flex gap-2 flex-wrap mb-2">
@@ -426,19 +602,13 @@ function FinalizarModal({informe,onConfirm,onClose}) {
           {/* Notas */}
           <div>
             <label className="block text-xs font-bold text-gray-400 mb-2 uppercase tracking-wider">Notas adicionales</label>
-            <textarea value={notas} onChange={e=>setNotas(e.target.value)} rows={3}
-              placeholder="Ej: Requiere sistema de iluminación de emergencia en salida principal."
+            <textarea value={notas} onChange={e=>setNotas(e.target.value)} rows={3} placeholder="Ej: Requiere sistema de iluminación de emergencia en salida principal."
               className="w-full border-2 border-gray-100 rounded-xl px-3 py-2.5 text-sm bg-gray-50 resize-none focus:outline-none focus:border-amber-400 focus:bg-white transition-all"/>
-          </div>
-          {/* Firebase note */}
-          <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-blue-50 border border-blue-100">
-            <span>🔄</span>
-            <p className="text-xs text-blue-700 font-medium">El informe se sincronizará automáticamente en todos los dispositivos.</p>
           </div>
           <button onClick={handleConfirm} disabled={saving}
             className="w-full py-4 rounded-2xl font-extrabold text-white text-base hover:opacity-90 active:scale-95 transition-all disabled:opacity-60"
-            style={{background:resultado==="Aprobada"?"#16a34a":resultado==="Rechazada"?"#dc2626":Y}}>
-            {saving?"⏳ Guardando…":`Generar Reporte ${resultado} →`}
+            style={{background:resultado==="Aprobada"?"#16a34a":resultado==="Condicionada"?Y:"#dc2626"}}>
+            {saving?"⏳ Guardando…":`Generar Reporte →`}
           </button>
         </div>
       </div>
@@ -461,7 +631,6 @@ function HomeView({informes,loading,onNew,onOpen,usuario,onLogout}) {
               <div className="text-white text-xs font-bold leading-tight">{usuario.nombre}</div>
               <button onClick={onLogout} className="text-white/40 hover:text-white/70 text-[10px] transition-colors">Cerrar sesión</button>
             </div>
-            <button onClick={onLogout} className="sm:hidden text-white/40 hover:text-white text-xs px-2 py-1 rounded-lg hover:bg-white/10 transition-colors">↩</button>
             <button onClick={onNew} className="flex items-center gap-1.5 px-4 py-2 rounded-xl font-bold text-sm text-gray-900 hover:opacity-90 active:scale-95" style={{background:Y}}>
               <span className="text-base leading-none">+</span> Nuevo
             </button>
@@ -481,20 +650,21 @@ function HomeView({informes,loading,onNew,onOpen,usuario,onLogout}) {
         ):!sorted.length?(
           <div className="text-center py-24">
             <div className="w-20 h-20 rounded-2xl mx-auto mb-5 flex items-center justify-center text-4xl" style={{background:Y+"22"}}>⚡</div>
-            <p className="text-gray-400 mb-6 text-sm">No hay informes guardados aún.</p>
-            <Btn onClick={onNew}>Crear primer informe</Btn>
+            <p className="text-gray-400 mb-6 text-sm">No hay informes. Toca <b>+ Nuevo</b> para comenzar.</p>
           </div>
         ):(
           <div className="space-y-3">
             {sorted.map(inf=>{
               const alta=(inf.elementos||[]).filter(e=>e.prioridad==="alta").length;
+              const tipoLabel=inf.tipo==="inspeccion"?"Inspección":"Verificación";
               return (
                 <div key={inf.id} onClick={()=>onOpen(inf)}
                   className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 cursor-pointer hover:shadow-md active:bg-gray-50 transition-all">
                   <div className="flex justify-between gap-3">
                     <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
                         <div className="font-mono text-[11px] text-gray-300 tracking-wider">{inf.codigo}</div>
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full border" style={{background:inf.tipo==="inspeccion"?DARK+"15":"#FFF3CD",color:inf.tipo==="inspeccion"?DARK:Y,borderColor:inf.tipo==="inspeccion"?DARK+"30":Y+"60"}}>{tipoLabel}</span>
                         {!inf.resultado&&<span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-50 text-blue-500 border border-blue-100">En curso</span>}
                       </div>
                       <div className="font-bold text-gray-800 truncate mt-0.5 text-sm">{inf.propietario||"Sin nombre"}</div>
@@ -508,7 +678,6 @@ function HomeView({informes,loading,onNew,onOpen,usuario,onLogout}) {
                   <div className="flex items-center gap-4 mt-3 pt-3 border-t border-gray-50 text-xs text-gray-400">
                     <span>📷 <b className="text-gray-600">{inf.elementos?.length||0}</b> elementos</span>
                     {alta>0&&<span className="font-bold text-red-400">🔴 {alta} alta prioridad</span>}
-                    <span className="text-gray-300 text-[10px]">{inf.ingeniero?.split(" ").slice(-2).join(" ")||""}</span>
                     <span className="ml-auto text-gray-300">→</span>
                   </div>
                 </div>
@@ -524,20 +693,23 @@ function HomeView({informes,loading,onNew,onOpen,usuario,onLogout}) {
 /* ═══════════════════════════════════════════
    NUEVO INFORME
 ═══════════════════════════════════════════ */
-function NuevoView({onCreate,onBack,usuario}) {
+function NuevoView({onCreate,onBack,usuario,tipo}) {
   const [f,setF]=useState({codigo:"",propietario:"",direccion:"",fecha:HOY,ingeniero:usuario.nombre,matricula:usuario.matricula});
   const s=(k,v)=>setF(p=>({...p,[k]:v}));
+  const tipoLabel=tipo==="inspeccion"?"Inspección":"Verificación";
   const go=()=>{
     if(!f.codigo.trim())return alert("El código de informe es requerido.\nEjemplo: INF-26-055");
     if(!f.propietario.trim())return alert("El nombre del propietario es requerido.");
-    onCreate({...f,id:Date.now(),elementos:[],resultado:null,plazo:"12 meses",notas:"",createdAt:Date.now()});
+    onCreate({...f,tipo,id:Date.now(),elementos:[],resultado:null,plazo:"12 meses",notas:"",createdAt:Date.now()});
   };
   return (
     <div className="min-h-screen" style={{background:"#f8f9fb"}}>
       <header style={{background:DARK}} className="px-4 py-4 sticky top-0 z-10">
         <div className="flex items-center gap-3 max-w-lg mx-auto">
           <button onClick={onBack} className="text-white/60 hover:text-white text-xl transition-colors">←</button>
-          <Logo sm white/><span className="font-bold text-white text-sm ml-1">Nuevo Informe</span>
+          <Logo sm white/>
+          <span className="font-bold text-white text-sm ml-1">Nueva {tipoLabel}</span>
+          <span className="ml-auto text-[10px] font-bold px-2 py-1 rounded-lg" style={{background:Y+"30",color:Y}}>{tipoLabel.toUpperCase()}</span>
         </div>
       </header>
       <div className="p-4 max-w-lg mx-auto space-y-3 pb-24">
@@ -549,36 +721,40 @@ function NuevoView({onCreate,onBack,usuario}) {
           <FI label="Propietario / Cliente *" value={f.propietario} onChange={e=>s("propietario",e.target.value)} placeholder="Nombre completo…"/>
           <FI label="Dirección" value={f.direccion} onChange={e=>s("direccion",e.target.value)} placeholder="San José, Montes de Oca…"/>
         </Card>
-        <Card title="Responsable de Verificación" accent>
+        <Card title="Responsable" accent>
           <FI label="Nombre del Ingeniero" value={f.ingeniero} onChange={e=>s("ingeniero",e.target.value)} placeholder="Ing. Nombre Apellido"/>
           <FI label="Matrícula" value={f.matricula} onChange={e=>s("matricula",e.target.value)} placeholder="IE-XXXXX / CAPDEE-XXX"/>
         </Card>
         <div className="flex items-start gap-3 px-4 py-3.5 rounded-2xl border-2" style={{borderColor:Y+"40",background:Y+"0f"}}>
           <span className="text-lg mt-0.5">💡</span>
           <p className="text-xs leading-relaxed" style={{color:"#92400e"}}>
-            El <b>resultado de la verificación</b> se asigna al finalizar. El informe se guarda en la nube y se puede acceder desde cualquier dispositivo.
+            {tipo==="inspeccion"
+              ? "Resultado: <b>Aprobada</b> o <b>No Aprobada</b>. Se asigna al finalizar la inspección."
+              : "Resultado: <b>Aprobada</b>, <b>Condicionada</b> o <b>Rechazada</b>. Se asigna al finalizar con plazo de mejoras."}
           </p>
         </div>
-        <Btn onClick={go} full>Iniciar Inspección →</Btn>
+        <Btn onClick={go} full>Iniciar {tipoLabel} →</Btn>
       </div>
     </div>
   );
 }
 
 /* ═══════════════════════════════════════════
-   INSPECCIÓN ACTIVA
+   INSPECCIÓN / VERIFICACIÓN ACTIVA
 ═══════════════════════════════════════════ */
 function InspeccionView({informe,onUpdate,onBack,onFinalize,onPreview}) {
   const [modal,setModal]=useState(false);
   const [editIdx,setEditIdx]=useState(null);
   const [finalM,setFinalM]=useState(false);
   const [syncing,setSyncing]=useState(false);
+  const tipo=informe.tipo||"verificacion";
+  const tipoLabel=tipo==="inspeccion"?"Inspección":"Verificación";
 
-  const saveEl = async (el) => {
-    const els = [...(informe.elementos || [])];
-    if (editIdx !== null) els[editIdx] = { ...el, num: editIdx + 1 };
-    else els.push({ ...el, num: els.length + 1 });
-    const updated = { ...informe, elementos: els };
+  const saveEl=async(el)=>{
+    const els=[...(informe.elementos||[])];
+    if(editIdx!==null)els[editIdx]={...el,num:editIdx+1};
+    else els.push({...el,num:els.length+1});
+    const updated={...informe,elementos:els};
     setSyncing(true);
     await saveInformeFS(updated);
     setSyncing(false);
@@ -614,6 +790,7 @@ function InspeccionView({informe,onUpdate,onBack,onFinalize,onPreview}) {
             <button onClick={onBack} className="text-white/60 hover:text-white text-xl transition-colors">←</button>
             <Logo sm white/>
             {syncing&&<div className="w-4 h-4 border-2 border-white/20 border-t-white/60 rounded-full animate-spin ml-1"/>}
+            <span className="ml-auto text-[10px] font-bold px-2 py-1 rounded-lg" style={{background:Y+"30",color:Y}}>{tipoLabel.toUpperCase()}</span>
           </div>
           <div className="flex items-start justify-between ml-1">
             <div>
@@ -622,7 +799,7 @@ function InspeccionView({informe,onUpdate,onBack,onFinalize,onPreview}) {
             </div>
             <div className="flex items-center gap-2">
               {informe.resultado&&<ResBadge v={informe.resultado}/>}
-              {informe.resultado&&<Btn onClick={onPreview} sm variant="out">📄 PDF</Btn>}
+              {informe.resultado&&<button onClick={()=>generateAndDownloadPDF(informe)} className="px-3 py-1.5 rounded-xl text-xs font-bold border-2 border-white/20 text-white hover:bg-white/10 transition-colors">🖨️ PDF</button>}
             </div>
           </div>
         </div>
@@ -647,10 +824,7 @@ function InspeccionView({informe,onUpdate,onBack,onFinalize,onPreview}) {
               <div className="flex gap-3 p-3">
                 {el.url?<img src={el.url} alt={el.titulo} className="w-20 h-20 object-cover rounded-xl shrink-0"/>:<div className="w-20 h-20 bg-gray-100 rounded-xl shrink-0 flex items-center justify-center text-2xl">📷</div>}
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center justify-between gap-1 mb-1">
-                    <span className="font-mono text-[10px] text-gray-300">({el.num})</span>
-                    <Badge v={el.prioridad}/>
-                  </div>
+                  <div className="flex items-center justify-between gap-1 mb-1"><span className="font-mono text-[10px] text-gray-300">({el.num})</span><Badge v={el.prioridad}/></div>
                   <div className="font-bold text-sm text-gray-800 leading-snug">{el.titulo}</div>
                   <div className="text-xs text-gray-400 mt-1">{el.hallazgos?.length||0} hallazgos · {el.acciones?.length||0} acciones</div>
                 </div>
@@ -662,17 +836,20 @@ function InspeccionView({informe,onUpdate,onBack,onFinalize,onPreview}) {
             </div>
           ))
         )}
+
+        {/* Finalizar card */}
         <div className={`rounded-2xl border-2 overflow-hidden ${informe.resultado?"border-green-200 bg-green-50":"border-dashed border-gray-200 bg-white"}`}>
           <div className="p-4">
             {informe.resultado?(
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="font-bold text-green-700 text-sm">✅ Inspección finalizada</p>
-                  <p className="text-xs text-green-600 mt-0.5">Resultado: <b>{informe.resultado}</b> · Plazo: {informe.plazo}</p>
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <p className="font-bold text-green-700 text-sm">✅ {tipoLabel} finalizada</p>
+                  <ResBadge v={informe.resultado}/>
                 </div>
+                {informe.tipo!=="inspeccion"&&<p className="text-xs text-green-600 mb-3">Plazo: {informe.plazo}</p>}
                 <div className="flex gap-2">
-                  <button onClick={()=>setFinalM(true)} className="px-3 py-1.5 rounded-xl text-xs font-bold border-2 border-green-200 text-green-700 hover:bg-green-100">Editar</button>
-                  <button onClick={onPreview} className="px-3 py-1.5 rounded-xl text-xs font-bold text-white hover:opacity-90" style={{background:"#16a34a"}}>📄 PDF</button>
+                  <button onClick={()=>setFinalM(true)} className="flex-1 py-2.5 rounded-xl text-xs font-bold border-2 border-green-200 text-green-700 hover:bg-green-100 transition-colors">✏️ Editar resultado</button>
+                  <button onClick={()=>generateAndDownloadPDF(informe)} className="flex-1 py-2.5 rounded-xl text-xs font-bold text-white hover:opacity-90 transition-opacity" style={{background:DARK}}>🖨️ Generar PDF</button>
                 </div>
               </div>
             ):(
@@ -680,18 +857,19 @@ function InspeccionView({informe,onUpdate,onBack,onFinalize,onPreview}) {
                 <p className="font-bold text-gray-500 text-sm mb-1">¿Terminaste de fotografiar?</p>
                 <p className="text-xs text-gray-400 mb-4">Al finalizar se asignará el resultado y el informe quedará disponible en todos los dispositivos.</p>
                 <button onClick={()=>{if(total===0){alert("Agrega al menos un elemento antes de finalizar.");return;}setFinalM(true);}}
-                  className="w-full py-3.5 rounded-xl font-extrabold text-white text-sm hover:opacity-90 active:scale-95 transition-all"
-                  style={{background:DARK}}>
-                  🏁 Finalizar Inspección y Asignar Resultado
+                  className="w-full py-3.5 rounded-xl font-extrabold text-white text-sm hover:opacity-90 active:scale-95 transition-all" style={{background:DARK}}>
+                  🏁 Finalizar {tipoLabel} y Asignar Resultado
                 </button>
               </div>
             )}
           </div>
         </div>
       </div>
+
       <button onClick={()=>{setEditIdx(null);setModal(true);}}
         className="fixed bottom-6 right-6 w-14 h-14 rounded-2xl shadow-2xl text-white text-3xl flex items-center justify-center z-20 active:scale-90 hover:opacity-90 transition-all"
         style={{background:Y}}>+</button>
+
       {modal&&<ElementoModal el={editIdx!==null?informe.elementos[editIdx]:null} num={editIdx!==null?editIdx+1:(informe.elementos?.length||0)+1} onSave={saveEl} onClose={()=>setModal(false)}/>}
       {finalM&&<FinalizarModal informe={informe} onConfirm={handleFinalize} onClose={()=>setFinalM(false)}/>}
     </div>
@@ -713,19 +891,26 @@ function ElementoModal({el,num,onSave,onClose}) {
   const [annot,setAnn]=useState(null);
   const fRef=useRef();
 
-  const onPhoto=async(e)=>{const f=e.target.files[0];if(!f)return;setErr(null);try{const{url:u}=await processPhoto(f);setAnn(u);}catch{setErr("Error al procesar la imagen.");}};
+  const onPhoto=async(e)=>{const f=e.target.files[0];if(!f)return;setErr(null);try{const{url:u,b64:b}=await processPhoto(f);setUrl(u);setB64(b);setAnn(u);}catch{setErr("Error al procesar la imagen.");}};
   const onAnnotConfirm=(finalUrl,finalB64)=>{setUrl(finalUrl);setB64(finalB64);setAnn(null);if(titulo.trim())analyze(finalB64);else setErr("Foto guardada. Escribe el título y toca IA NEC.");};
+
   const analyze=async(b=b64)=>{
     if(!b){setErr("Primero adjunta una fotografía.");return;}
     if(!titulo.trim()){setErr("Escribe el título antes de analizar.");return;}
     setBusy(true);setErr(null);
-    try{const r=await callAI(b,titulo.trim());setH(r.hallazgos||[]);setA(r.acciones||[]);}
-    catch(e){setErr("Error IA: "+e.message);}
+    try{
+      const r=await callAI(b,titulo.trim());
+      setH(r.hallazgos||[]);setA(r.acciones||[]);
+    }catch(e){setErr("Error IA: "+e.message);}
     finally{setBusy(false);}
   };
-  const save=()=>{if(!titulo.trim()){setErr("El título del elemento es requerido.");return;}onSave({titulo:titulo.trim(),url,b64,hallazgos:H,acciones:A,prioridad:prio,num});};
 
-  if(annot)return <AnnotationEditor imageUrl={annot} onConfirm={onAnnotConfirm} onClose={()=>setAnn(null)}/>;
+  const save=()=>{
+    if(!titulo.trim()){setErr("El título del elemento es requerido.");return;}
+    onSave({titulo:titulo.trim(),url,b64,hallazgos:H,acciones:A,prioridad:prio,num});
+  };
+
+  if(annot)return <AnnotationEditor imageUrl={annot} onConfirm={onAnnotConfirm} onClose={()=>{setAnn(null);setB64(null);setUrl(null);}}/>;
 
   return (
     <div className="fixed inset-0 bg-black/70 z-40 flex flex-col justify-end sm:justify-center sm:items-center sm:p-4">
@@ -772,140 +957,54 @@ function ElementoModal({el,num,onSave,onClose}) {
 }
 
 /* ═══════════════════════════════════════════
-   PREVIEW / PDF
-═══════════════════════════════════════════ */
-const RPage=({children,page,total,nEl})=>(
-  <div className="rp bg-white rounded-2xl shadow-md overflow-hidden" style={{minHeight:"21cm"}}>
-    <div className="flex items-start justify-between px-5 pt-4 pb-3 border-b-2 border-gray-100">
-      <Logo sm/>
-      <div className="text-right text-[10px] text-gray-500 space-y-0.5">
-        <div><b>Empresa:</b> {CO.nombre} &nbsp;|&nbsp; <b>N.º de elementos:</b> {nEl}</div>
-        <div><b>Teléfono:</b> {CO.tel} &nbsp;|&nbsp; <b>Correo:</b> {CO.correo}</div>
-        <div><b>Dirección:</b> {CO.dir}</div>
-      </div>
-    </div>
-    <div className="mx-5 border-b border-gray-200 mb-1"/>
-    <div className="px-5 py-3">{children}</div>
-    <div className="flex items-center justify-between px-5 py-3 border-t-2 border-gray-100 mt-4">
-      <Logo sm/><span className="text-xs text-gray-400 font-mono">página {page} de {total}</span>
-    </div>
-  </div>
-);
-
-function PreviewView({informe,onBack}) {
-  const nEl=informe.elementos?.length||0;const total=nEl+2;
-  return (
-    <>
-      <style>{`@media print{.no-print{display:none!important}body{background:white!important;margin:0}.rp{page-break-after:always;box-shadow:none!important;border-radius:0!important;margin:0!important;border:none!important;max-width:100%!important}.rp:last-child{page-break-after:avoid}}`}</style>
-      <div className="min-h-screen" style={{background:"#e5e7eb"}}>
-        <div className="no-print px-4 py-3 flex items-center justify-between sticky top-0 z-10 shadow-sm" style={{background:DARK}}>
-          <button onClick={onBack} className="text-white/60 hover:text-white text-sm transition-colors">← Volver</button>
-          <Logo sm white/>
-          <button onClick={()=>window.print()} className="px-4 py-2 rounded-xl font-bold text-sm text-gray-900 hover:opacity-90 active:scale-95" style={{background:Y}}>🖨️ PDF</button>
-        </div>
-        <div className="py-6 px-3 max-w-3xl mx-auto space-y-4">
-          <RPage page={1} total={total} nEl={nEl}>
-            <div className="flex flex-col items-center py-8 text-center">
-              <div className="w-24 h-24 rounded-3xl flex items-center justify-center mb-5 text-5xl" style={{background:Y+"22"}}>⚡</div>
-              <h1 className="text-xl font-extrabold text-gray-900 mb-3 leading-snug max-w-md">{informe.codigo} — Informe Verificación Eléctrica</h1>
-              <p className="text-gray-400 text-sm mb-6 max-w-sm">Informe fotográfico con resumen de hallazgos y acciones requeridas para la Verificación Eléctrica.</p>
-              <div className="text-sm text-gray-700 space-y-1.5 text-left w-full max-w-xs">
-                <div><b>Propietario:</b> {informe.propietario}</div>
-                <div><b>Dirección:</b> {informe.direccion}</div>
-                <div><b>Fecha:</b> {fmtFecha(informe.fecha)}</div>
-                <div><b>Versión:</b> 0.1V</div>
-                {informe.ingeniero&&<div><b>Responsable:</b> {informe.ingeniero}. {informe.matricula}.</div>}
-              </div>
-            </div>
-          </RPage>
-          <RPage page={2} total={total} nEl={nEl}>
-            <h2 className="font-extrabold text-gray-800 mb-3">Análisis y Limitaciones del presente informe fotográfico:</h2>
-            <p className="text-xs text-gray-600 leading-relaxed mb-2">El presente informe fotográfico documenta las no conformidades identificadas durante la verificación visual de las instalaciones eléctricas, conforme al artículo 5.2 del Reglamento de Oficialización del Código Eléctrico de Costa Rica (RTCR 458:2011), Decreto Ejecutivo N.° 36979-MEIC y sus reformas. La evaluación se fundamenta en el Anexo B para condiciones de "Peligro Inminente" o "Alto Riesgo", complementada con las referencias del Código Eléctrico NFPA 70 (NEC), edición 2020.</p>
-            <p className="text-xs text-gray-600 leading-relaxed">Los hallazgos se sustentan en la evidencia visible al momento de la inspección. Durante la ejecución de reparaciones, toda condición adicional que represente incumplimiento normativo deberá ser corregida, aun cuando no haya sido señalada individualmente.</p>
-          </RPage>
-          {(informe.elementos||[]).map((el,i)=>(
-            <RPage key={i} page={i+3} total={total} nEl={nEl}>
-              <div className="flex gap-5">
-                {el.url?<img src={el.url} alt={el.titulo} className="w-52 h-48 object-cover rounded-2xl border border-gray-200 shrink-0" crossOrigin="anonymous"/>:<div className="w-52 h-48 bg-gray-100 rounded-2xl shrink-0 flex items-center justify-center text-4xl">📷</div>}
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-3 flex-wrap">
-                    <span className="font-bold text-gray-900 text-sm">Título: {el.titulo}</span><Badge v={el.prioridad}/>
-                  </div>
-                  <p className="font-bold text-xs text-gray-700 mb-1">Hallazgos:</p>
-                  {(el.hallazgos||[]).map((h,j)=><p key={j} className="text-xs text-gray-700 leading-relaxed">-{h}</p>)}
-                  <p className="font-bold text-xs text-gray-700 mt-3 mb-1">Acciones requeridas:</p>
-                  {(el.acciones||[]).map((a,j)=><p key={j} className="text-xs text-gray-700 leading-relaxed">-{a}</p>)}
-                </div>
-              </div>
-              <div className="text-right text-[10px] text-gray-400 mt-2">({el.num})</div>
-            </RPage>
-          ))}
-          <RPage page={total} total={total} nEl={nEl}>
-            <h2 className="text-base font-extrabold text-gray-800 mb-5">Final de Reporte</h2>
-            <div className="text-sm text-gray-700 space-y-2">
-              <div><b>Resultado de verificación:</b> {informe.resultado}.</div>
-              <div><b>Plazo para ejecución de mejoras:</b> {informe.plazo}.</div>
-              {informe.notas&&<div className="mt-1"><b>Notas adicionales:</b><div className="whitespace-pre-wrap mt-0.5">{informe.notas}</div></div>}
-            </div>
-            {informe.ingeniero&&(
-              <div className="mt-16">
-                <div className="w-56 border-b-2 border-gray-300 mb-2"/>
-                <div className="text-sm text-gray-700"><div className="font-bold">{informe.ingeniero}</div><div>{informe.matricula}</div></div>
-              </div>
-            )}
-          </RPage>
-        </div>
-      </div>
-    </>
-  );
-}
-
-/* ═══════════════════════════════════════════
    ROOT
 ═══════════════════════════════════════════ */
 export default function App() {
   const [view,    setV]    = useState("login");
   const [usuario, setUsr]  = useState(()=>lsto.get("e_usr")||null);
+  const [tipoNuevo,setTipo]= useState(null);
   const [informes,setI]    = useState([]);
   const [loading, setLoad] = useState(true);
   const [active,  setAct]  = useState(null);
 
-  /* Firestore real-time listener */
+  /* Firebase real-time */
   useEffect(()=>{
     if(!usuario){setLoad(false);return;}
     const q=query(collection(db,"informes"),orderBy("createdAt","desc"));
     const unsub=onSnapshot(q,(snap)=>{
-      const data=snap.docs.map(d=>({...d.data(),id:d.id}));
-      setI(data);setLoad(false);
+      setI(snap.docs.map(d=>({...d.data(),id:d.id})));
+      setLoad(false);
     },(err)=>{console.error("Firestore:",err);setLoad(false);});
-    return ()=>unsub();
+    return()=>unsub();
   },[usuario]);
 
-  useEffect(()=>{ if(usuario)setV("home"); },[usuario]);
+  useEffect(()=>{ if(usuario)setV("selector"); },[usuario]);
 
-  const login=(u)=>{lsto.set("e_usr",u);setUsr(u);setV("home");};
+  const login=(u)=>{lsto.set("e_usr",u);setUsr(u);setV("selector");};
   const logout=()=>{lsto.set("e_usr",null);setUsr(null);setV("login");};
 
   const create=async(data)=>{
     await saveInformeFS(data);
     setAct(data);setV("insp");
   };
-
   const update=(inf)=>{
     setI(prev=>prev.map(i=>String(i.id)===String(inf.id)?inf:i));
     setAct(inf);
   };
-
   const open=(inf)=>{setAct(inf);setV("insp");};
-
   const finalize=(inf)=>{
     setI(prev=>prev.map(i=>String(i.id)===String(inf.id)?inf:i));
-    setAct(inf);setV("prev");
+    setAct(inf);setV("home");
   };
 
-  if(view==="login")  return <LoginView onLogin={login}/>;
-  if(view==="home")   return <HomeView informes={informes} loading={loading} onNew={()=>setV("nuevo")} onOpen={open} usuario={usuario} onLogout={logout}/>;
-  if(view==="nuevo")  return <NuevoView onCreate={create} onBack={()=>setV("home")} usuario={usuario}/>;
-  if(view==="insp")   return <InspeccionView informe={active} onUpdate={update} onBack={()=>setV("home")} onFinalize={finalize} onPreview={()=>setV("prev")}/>;
-  if(view==="prev")   return <PreviewView informe={active} onBack={()=>setV("insp")}/>;
+  const handleTipoSelect=(t)=>{
+    if(t==="home"){setV("home");return;}
+    setTipo(t);setV("nuevo");
+  };
+
+  if(view==="login")    return <LoginView onLogin={login}/>;
+  if(view==="selector") return <TipoSelectorView onSelect={handleTipoSelect} usuario={usuario} onLogout={logout}/>;
+  if(view==="home")     return <HomeView informes={informes} loading={loading} onNew={()=>setV("selector")} onOpen={open} usuario={usuario} onLogout={logout}/>;
+  if(view==="nuevo")    return <NuevoView onCreate={create} onBack={()=>setV("selector")} usuario={usuario} tipo={tipoNuevo}/>;
+  if(view==="insp")     return <InspeccionView informe={active} onUpdate={update} onBack={()=>setV("home")} onFinalize={finalize} onPreview={()=>{}}/>;
 }
