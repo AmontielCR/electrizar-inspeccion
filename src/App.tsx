@@ -107,34 +107,17 @@ const processPhoto = (file) =>
     img.src = u;
   });
 
-const callAI = async (b64, titulo) => {
-  const r = await fetch("/api/analyze", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model: "claude-sonnet-4-20250514",
-      max_tokens: 1000,
-      messages: [{
-        role: "user",
-        content: [
-          { type:"image", source:{ type:"base64", media_type:"image/jpeg", data: b64 } },
-          { type:"text",  text:
-`Eres ingeniero eléctrico experto en NEC 2020 (NFPA 70) aplicado en Costa Rica bajo RTCR 458:2011 (D.E. 36979-MEIC).
-Analiza la foto de inspección eléctrica titulada: "${titulo}"
-Las anotaciones (flechas, círculos, marcas) indican los puntos específicos a evaluar.
-Responde SOLO con JSON válido sin texto adicional ni backticks:
-{"hallazgos":["hallazgo citando Art. NEC"],"acciones":["acción correctiva"]}
-Reglas: cita Art. NEC en cada hallazgo, máximo 5 de cada uno, español técnico.
-Sin observaciones → {"hallazgos":["Sin observaciones."],"acciones":["Verificar sellos y fijación en campo."]}` },
-        ],
-      }],
-    }),
-  });
-  const d = await r.json();
-  if (d.error) throw new Error(d.error.message || JSON.stringify(d.error));
-  const txt = (d.content||[]).map(c=>c.text||"").join("").replace(/```json|```/g,"").trim();
-  return JSON.parse(txt);
-};
+  const callAI = async (b64, titulo) => {
+    const r = await fetch("/api/analyze", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ b64, titulo }),
+    });
+    const d = await r.json();
+    if (d.error) throw new Error(d.error);
+    if (!d.hallazgos) throw new Error("Respuesta inesperada de la IA");
+    return d;
+  };
 
 const fmtFecha = (iso) => {
   if (!iso) return "";
