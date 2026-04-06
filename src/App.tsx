@@ -1,12 +1,64 @@
 import { useState, useRef, useEffect, useCallback } from "react";
+import { initializeApp } from "firebase/app";
+import {
+  getFirestore, collection, doc, setDoc, onSnapshot,
+  query, orderBy, deleteDoc, serverTimestamp,
+} from "firebase/firestore";
+import {
+  getStorage, ref, uploadString, getDownloadURL, deleteObject,
+} from "firebase/storage";
+
+/* ═══════════════════════════════════════════
+   FIREBASE
+═══════════════════════════════════════════ */
+const firebaseConfig = {
+  apiKey: "AIzaSyBpZ_ZK8o6kopoPwp1goAbLXWzja2NuCiA",
+  authDomain: "electrizar-inspecciones.firebaseapp.com",
+  projectId: "electrizar-inspecciones",
+  storageBucket: "electrizar-inspecciones.firebasestorage.app",
+  messagingSenderId: "664280211024",
+  appId: "1:664280211024:web:41da18e05445ab15af3b55",
+};
+const fbApp  = initializeApp(firebaseConfig);
+const db      = getFirestore(fbApp);
+const storage = getStorage(fbApp);
+
+/* ── Firestore helpers ── */
+const saveInformeFS = async (informe) => {
+  // Guardar elementos sin b64 (las fotos van a Storage)
+  const data = {
+    ...informe,
+    elementos: (informe.elementos || []).map(e => ({ ...e, b64: null })),
+    updatedAt: serverTimestamp(),
+  };
+  await setDoc(doc(db, "informes", String(informe.id)), data);
+};
+
+const deleteInformeFS = async (id) => {
+  await deleteDoc(doc(db, "informes", String(id)));
+};
+
+/* ── Storage helpers ── */
+const uploadPhoto = async (informeId, elementoNum, dataUrl) => {
+  if (!dataUrl) return null;
+  try {
+    const path = `informes/${informeId}/foto_${String(elementoNum).padStart(2,"0")}.jpg`;
+    const r = ref(storage, path);
+    await uploadString(r, dataUrl, "data_url");
+    return await getDownloadURL(r);
+  } catch (e) {
+    console.warn("Storage upload error:", e);
+    return dataUrl; // fallback: keep local
+  }
+};
 
 /* ═══════════════════════════════════════════
    USUARIOS
 ═══════════════════════════════════════════ */
 const USUARIOS = [
-  { user: "amontiel",  pass: "cubillo26",  nombre: "Ing. Alonso Montiel Cubillo",  matricula: "IE-24011 / CAPDEE-165", rol: "ingeniero" },
-  { user: "jrodriguez", pass: "reyes26",   nombre: "Ing. Josué Rodríguez Reyes",   matricula: "",                       rol: "ingeniero" },
-  { user: "tecnicos",  pass: "usuario26",  nombre: "Técnico de Campo",              matricula: "",                       rol: "tecnico" },
+  { user:"amontiel",   pass:"cubillo26", nombre:"Ing. Alonso Montiel Cubillo", matricula:"IE-24011 / CAPDEE-165", rol:"ingeniero" },
+  { user:"jrodriguez", pass:"reyes26",   nombre:"Ing. Josué Rodríguez Reyes",  matricula:"",                      rol:"ingeniero" },
+  { user:"tecnicos",   pass:"usuario26", nombre:"Técnico de Campo",             matricula:"",                      rol:"tecnico"   },
 ];
 
 /* ═══════════════════════════════════════════
@@ -16,12 +68,12 @@ const Y    = "#F5A800";
 const DARK = "#111827";
 const CO   = {
   nombre: "Electrizar Electromecánica SRL",
-  tel: "4001-7246",
+  tel:    "4001-7246",
   correo: "amontiel@electrizarcr.com",
-  dir: "Calle Blancos, Goicoechea, San José, Costa Rica.",
+  dir:    "Calle Blancos, Goicoechea, San José, Costa Rica.",
 };
 const PRIOS = [
-  { v:"alta",   L:"Alta",   c:"#dc2626", tw:"bg-red-50 text-red-700 border-red-200" },
+  { v:"alta",   L:"Alta",   c:"#dc2626", tw:"bg-red-50 text-red-700 border-red-200"   },
   { v:"normal", L:"Normal", c:Y,         tw:"bg-amber-50 text-amber-700 border-amber-200" },
   { v:"baja",   L:"Baja",   c:"#16a34a", tw:"bg-green-50 text-green-700 border-green-200" },
 ];
@@ -32,7 +84,7 @@ const MESES = ["enero","febrero","marzo","abril","mayo","junio","julio","agosto"
 /* ═══════════════════════════════════════════
    UTILS
 ═══════════════════════════════════════════ */
-const sto = {
+const lsto = {
   get: (k)    => { try { return JSON.parse(localStorage.getItem(k)); } catch { return null; } },
   set: (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
 };
@@ -40,7 +92,7 @@ const sto = {
 const processPhoto = (file) =>
   new Promise((res, rej) => {
     const img = new Image();
-    const u = URL.createObjectURL(file);
+    const u   = URL.createObjectURL(file);
     img.onload = () => {
       const max = 1100;
       let w = img.width, h = img.height;
@@ -68,7 +120,7 @@ const callAI = async (b64, titulo) => {
         role: "user",
         content: [
           { type:"image", source:{ type:"base64", media_type:"image/jpeg", data: b64 } },
-          { type:"text", text:
+          { type:"text",  text:
 `Eres ingeniero eléctrico experto en NEC 2020 (NFPA 70) aplicado en Costa Rica bajo RTCR 458:2011 (D.E. 36979-MEIC).
 Analiza la foto de inspección eléctrica titulada: "${titulo}"
 Las anotaciones (flechas, círculos, marcas) indican los puntos específicos a evaluar.
@@ -84,15 +136,6 @@ Sin observaciones → {"hallazgos":["Sin observaciones."],"acciones":["Verificar
   if (d.error) throw new Error(d.error.message || JSON.stringify(d.error));
   const txt = (d.content||[]).map(c=>c.text||"").join("").replace(/```json|```/g,"").trim();
   return JSON.parse(txt);
-};
-
-const saveToOneDrive = async (informe) => {
-  const r = await fetch("/api/onedrive", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ informe }),
-  });
-  return r.json();
 };
 
 const fmtFecha = (iso) => {
@@ -122,39 +165,33 @@ const Logo = ({ sm, white }) => (
 );
 
 const Badge = ({v}) => { const p=PRIOS.find(x=>x.v===v)||PRIOS[1]; return <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${p.tw}`}>{p.L}</span>; };
-
 const ResBadge = ({v}) => {
   if (!v) return null;
   const cfg = v==="Aprobada"?"bg-green-100 text-green-700":v==="Rechazada"?"bg-red-100 text-red-700":"bg-amber-100 text-amber-700";
   return <span className={`text-[11px] font-bold px-2.5 py-1 rounded-full ${cfg}`}>{v}</span>;
 };
-
 const Pill = ({children,active,color,onClick}) => (
   <button onClick={onClick}
     className={`flex-1 py-2.5 rounded-xl text-sm font-bold border-2 transition-all ${active?"text-white":"border-gray-200 text-gray-400 bg-white hover:bg-gray-50"}`}
     style={active?{background:color||Y,borderColor:color||Y}:{}}>{children}</button>
 );
-
 const Btn = ({children,onClick,variant="pri",sm,disabled,full,className=""}) => {
   const base=`font-bold rounded-xl transition-all active:scale-95 flex items-center justify-center gap-1.5 ${sm?"px-3 py-2 text-sm":"px-5 py-3"} ${full?"w-full":""} ${className}`;
   if (variant==="pri") return <button onClick={onClick} disabled={disabled} className={`${base} ${disabled?"opacity-50 cursor-not-allowed":"hover:opacity-90"}`} style={{background:disabled?"#9ca3af":Y,color:"white"}}>{children}</button>;
   return <button onClick={onClick} disabled={disabled} className={`${base} border-2 border-gray-200 bg-white text-gray-700 hover:bg-gray-50 ${disabled?"opacity-50":""}`}>{children}</button>;
 };
-
 const Card = ({title,children,accent}) => (
   <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
-    {title && <div className="px-4 pt-4 pb-2 flex items-center gap-2">{accent && <div className="w-1 h-4 rounded-full" style={{background:Y}}/>}<h3 className="font-bold text-gray-700 text-xs uppercase tracking-widest">{title}</h3></div>}
+    {title && <div className="px-4 pt-4 pb-2 flex items-center gap-2">{accent&&<div className="w-1 h-4 rounded-full" style={{background:Y}}/>}<h3 className="font-bold text-gray-700 text-xs uppercase tracking-widest">{title}</h3></div>}
     <div className="px-4 pb-4 space-y-3">{children}</div>
   </div>
 );
-
 const FI = ({label,value,onChange,...rest}) => (
   <div>
     <label className="block text-xs font-semibold text-gray-400 mb-1 uppercase tracking-wider">{label}</label>
     <input value={value} onChange={onChange} className="w-full border-2 border-gray-100 rounded-xl px-3 py-2.5 text-sm text-gray-800 bg-gray-50 focus:outline-none focus:border-amber-400 focus:bg-white transition-all" {...rest}/>
   </div>
 );
-
 const ListEditor = ({label,items,set,placeholder}) => (
   <div>
     <div className="flex items-center justify-between mb-2">
@@ -175,21 +212,18 @@ const ListEditor = ({label,items,set,placeholder}) => (
 );
 
 /* ═══════════════════════════════════════════
-   LOGIN VIEW
+   LOGIN
 ═══════════════════════════════════════════ */
 function LoginView({onLogin}) {
-  const [user,setUser]   = useState("");
-  const [pass,setPass]   = useState("");
-  const [err,setErr]     = useState(null);
-  const [show,setShow]   = useState(false);
-
+  const [user,setUser] = useState("");
+  const [pass,setPass] = useState("");
+  const [err,setErr]   = useState(null);
+  const [show,setShow] = useState(false);
   const handle = () => {
     const found = USUARIOS.find(u=>u.user===user.trim()&&u.pass===pass);
     if (!found) { setErr("Usuario o contraseña incorrectos."); return; }
-    setErr(null);
     onLogin(found);
   };
-
   return (
     <div className="min-h-screen flex flex-col items-center justify-center p-6" style={{background:DARK}}>
       <div className="w-full max-w-sm">
@@ -198,41 +232,27 @@ function LoginView({onLogin}) {
         </div>
         <h1 className="text-white font-extrabold text-2xl text-center mb-1">Inspecciones Eléctricas</h1>
         <p className="text-white/40 text-sm text-center mb-8">Verificación NEC 2020 · Electrizar</p>
-
         <div className="space-y-3">
           <div>
             <label className="block text-white/50 text-xs font-bold mb-1.5 uppercase tracking-wider">Usuario</label>
-            <input value={user} onChange={e=>{setUser(e.target.value);setErr(null);}}
-              onKeyDown={e=>e.key==="Enter"&&handle()}
+            <input value={user} onChange={e=>{setUser(e.target.value);setErr(null);}} onKeyDown={e=>e.key==="Enter"&&handle()}
               className="w-full bg-white/10 border-2 border-white/10 rounded-xl px-4 py-3 text-white placeholder-white/30 text-sm focus:outline-none focus:border-amber-400 transition-all"
               placeholder="amontiel"/>
           </div>
           <div>
             <label className="block text-white/50 text-xs font-bold mb-1.5 uppercase tracking-wider">Contraseña</label>
             <div className="relative">
-              <input value={pass} onChange={e=>{setPass(e.target.value);setErr(null);}}
-                onKeyDown={e=>e.key==="Enter"&&handle()}
+              <input value={pass} onChange={e=>{setPass(e.target.value);setErr(null);}} onKeyDown={e=>e.key==="Enter"&&handle()}
                 type={show?"text":"password"}
                 className="w-full bg-white/10 border-2 border-white/10 rounded-xl px-4 py-3 text-white placeholder-white/30 text-sm focus:outline-none focus:border-amber-400 transition-all"
                 placeholder="••••••••"/>
-              <button onClick={()=>setShow(p=>!p)} className="absolute right-3 top-1/2 -translate-y-1/2 text-white/40 hover:text-white/70 text-xs">
-                {show?"Ocultar":"Ver"}
-              </button>
+              <button onClick={()=>setShow(p=>!p)} className="absolute right-3 top-1/2 -translate-y-1/2 text-white/40 hover:text-white/70 text-xs">{show?"Ocultar":"Ver"}</button>
             </div>
           </div>
-
           {err && <div className="bg-red-900/40 border border-red-500/40 rounded-xl px-4 py-2.5 text-red-300 text-xs font-medium">⚠️ {err}</div>}
-
-          <button onClick={handle}
-            className="w-full py-3.5 rounded-2xl font-extrabold text-gray-900 text-sm hover:opacity-90 active:scale-95 transition-all mt-2"
-            style={{background:Y}}>
-            Entrar →
-          </button>
+          <button onClick={handle} className="w-full py-3.5 rounded-2xl font-extrabold text-gray-900 text-sm hover:opacity-90 active:scale-95 transition-all mt-2" style={{background:Y}}>Entrar →</button>
         </div>
-
-        <p className="text-white/20 text-xs text-center mt-8">
-          ☁️ Los informes se guardan en OneDrive
-        </p>
+        <p className="text-white/20 text-xs text-center mt-8">☁️ Sincronizado en todos los dispositivos</p>
       </div>
     </div>
   );
@@ -242,23 +262,13 @@ function LoginView({onLogin}) {
    ANNOTATION EDITOR
 ═══════════════════════════════════════════ */
 function AnnotationEditor({imageUrl,onConfirm,onClose}) {
-  const canvasRef=useRef(null);
-  const imgRef=useRef(new Image());
-  const [tool,setTool]=useState("arrow");
-  const [color,setColor]=useState("#ef4444");
-  const [shapes,setShapes]=useState([]);
-  const [drawing,setDraw]=useState(false);
-  const [startPt,setStart]=useState(null);
-  const [curPt,setCur]=useState(null);
-  const [loaded,setLoaded]=useState(false);
-  const [textDlg,setTDlg]=useState(null);
-  const [textVal,setTVal]=useState("");
+  const canvasRef=useRef(null); const imgRef=useRef(new Image());
+  const [tool,setTool]=useState("arrow"); const [color,setColor]=useState("#ef4444");
+  const [shapes,setShapes]=useState([]); const [drawing,setDraw]=useState(false);
+  const [startPt,setStart]=useState(null); const [curPt,setCur]=useState(null);
+  const [loaded,setLoaded]=useState(false); const [textDlg,setTDlg]=useState(null); const [textVal,setTVal]=useState("");
 
-  useEffect(()=>{
-    const img=imgRef.current;
-    img.onload=()=>{const c=canvasRef.current;if(!c)return;c.width=img.naturalWidth;c.height=img.naturalHeight;setLoaded(true);};
-    img.src=imageUrl;
-  },[imageUrl]);
+  useEffect(()=>{const img=imgRef.current;img.onload=()=>{const c=canvasRef.current;if(!c)return;c.width=img.naturalWidth;c.height=img.naturalHeight;setLoaded(true);};img.src=imageUrl;},[imageUrl]);
 
   const getPos=useCallback((e)=>{
     const c=canvasRef.current;if(!c)return{x:0,y:0};
@@ -272,61 +282,21 @@ function AnnotationEditor({imageUrl,onConfirm,onClose}) {
 
   const drawOne=useCallback((ctx,s)=>{
     ctx.save();ctx.strokeStyle=s.color;ctx.fillStyle=s.color;ctx.lineWidth=4;ctx.lineCap="round";ctx.lineJoin="round";
-    if(s.tool==="arrow"){
-      const dx=s.x2-s.x1,dy=s.y2-s.y1,len=Math.sqrt(dx*dx+dy*dy);
-      if(len<6){ctx.restore();return;}
-      const ang=Math.atan2(dy,dx),hl=Math.min(26,len*0.36);
-      ctx.beginPath();ctx.moveTo(s.x1,s.y1);ctx.lineTo(s.x2,s.y2);ctx.stroke();
-      ctx.beginPath();ctx.moveTo(s.x2,s.y2);
-      ctx.lineTo(s.x2-hl*Math.cos(ang-Math.PI/6),s.y2-hl*Math.sin(ang-Math.PI/6));
-      ctx.lineTo(s.x2-hl*Math.cos(ang+Math.PI/6),s.y2-hl*Math.sin(ang+Math.PI/6));
-      ctx.closePath();ctx.fill();
-    } else if(s.tool==="circle"){
-      const rx=Math.abs(s.x2-s.x1)/2,ry=Math.abs(s.y2-s.y1)/2;
-      ctx.beginPath();ctx.ellipse((s.x1+s.x2)/2,(s.y1+s.y2)/2,Math.max(rx,4),Math.max(ry,4),0,0,2*Math.PI);ctx.stroke();
-    } else if(s.tool==="rect"){
-      ctx.beginPath();ctx.rect(s.x1,s.y1,s.x2-s.x1,s.y2-s.y1);ctx.stroke();
-    } else if(s.tool==="cross"){
-      const sz=24;ctx.lineWidth=5;
-      ctx.beginPath();ctx.moveTo(s.x1-sz,s.y1-sz);ctx.lineTo(s.x1+sz,s.y1+sz);ctx.moveTo(s.x1+sz,s.y1-sz);ctx.lineTo(s.x1-sz,s.y1+sz);ctx.stroke();
-    } else if(s.tool==="text"){
-      const fs=Math.max(18,Math.round((canvasRef.current?.width||900)/20));
-      ctx.font=`bold ${fs}px sans-serif`;ctx.strokeStyle="rgba(0,0,0,0.6)";ctx.lineWidth=3;
-      ctx.strokeText(s.text,s.x1,s.y1);ctx.fillStyle=s.color;ctx.fillText(s.text,s.x1,s.y1);
-    }
+    if(s.tool==="arrow"){const dx=s.x2-s.x1,dy=s.y2-s.y1,len=Math.sqrt(dx*dx+dy*dy);if(len<6){ctx.restore();return;}const ang=Math.atan2(dy,dx),hl=Math.min(26,len*0.36);ctx.beginPath();ctx.moveTo(s.x1,s.y1);ctx.lineTo(s.x2,s.y2);ctx.stroke();ctx.beginPath();ctx.moveTo(s.x2,s.y2);ctx.lineTo(s.x2-hl*Math.cos(ang-Math.PI/6),s.y2-hl*Math.sin(ang-Math.PI/6));ctx.lineTo(s.x2-hl*Math.cos(ang+Math.PI/6),s.y2-hl*Math.sin(ang+Math.PI/6));ctx.closePath();ctx.fill();}
+    else if(s.tool==="circle"){const rx=Math.abs(s.x2-s.x1)/2,ry=Math.abs(s.y2-s.y1)/2;ctx.beginPath();ctx.ellipse((s.x1+s.x2)/2,(s.y1+s.y2)/2,Math.max(rx,4),Math.max(ry,4),0,0,2*Math.PI);ctx.stroke();}
+    else if(s.tool==="rect"){ctx.beginPath();ctx.rect(s.x1,s.y1,s.x2-s.x1,s.y2-s.y1);ctx.stroke();}
+    else if(s.tool==="cross"){const sz=24;ctx.lineWidth=5;ctx.beginPath();ctx.moveTo(s.x1-sz,s.y1-sz);ctx.lineTo(s.x1+sz,s.y1+sz);ctx.moveTo(s.x1+sz,s.y1-sz);ctx.lineTo(s.x1-sz,s.y1+sz);ctx.stroke();}
+    else if(s.tool==="text"){const fs=Math.max(18,Math.round((canvasRef.current?.width||900)/20));ctx.font=`bold ${fs}px sans-serif`;ctx.strokeStyle="rgba(0,0,0,0.6)";ctx.lineWidth=3;ctx.strokeText(s.text,s.x1,s.y1);ctx.fillStyle=s.color;ctx.fillText(s.text,s.x1,s.y1);}
     ctx.restore();
   },[]);
 
-  const redraw=useCallback(()=>{
-    const c=canvasRef.current;if(!c||!loaded)return;
-    const ctx=c.getContext("2d");ctx.clearRect(0,0,c.width,c.height);ctx.drawImage(imgRef.current,0,0,c.width,c.height);
-    shapes.forEach(s=>drawOne(ctx,s));
-    if(drawing&&startPt&&curPt&&tool!=="text"&&tool!=="cross")
-      drawOne(ctx,{tool,color,x1:startPt.x,y1:startPt.y,x2:curPt.x,y2:curPt.y});
-  },[loaded,shapes,drawing,startPt,curPt,tool,color,drawOne]);
-
+  const redraw=useCallback(()=>{const c=canvasRef.current;if(!c||!loaded)return;const ctx=c.getContext("2d");ctx.clearRect(0,0,c.width,c.height);ctx.drawImage(imgRef.current,0,0,c.width,c.height);shapes.forEach(s=>drawOne(ctx,s));if(drawing&&startPt&&curPt&&tool!=="text"&&tool!=="cross")drawOne(ctx,{tool,color,x1:startPt.x,y1:startPt.y,x2:curPt.x,y2:curPt.y});},[loaded,shapes,drawing,startPt,curPt,tool,color,drawOne]);
   useEffect(()=>{redraw();},[redraw]);
 
-  const onDown=useCallback((e)=>{
-    if(e.cancelable)e.preventDefault();const pos=getPos(e);
-    if(tool==="cross"){setShapes(p=>[...p,{tool:"cross",color,x1:pos.x,y1:pos.y}]);return;}
-    if(tool==="text"){setTDlg(pos);setTVal("");return;}
-    setDraw(true);setStart(pos);setCur(pos);
-  },[tool,color,getPos]);
-
+  const onDown=useCallback((e)=>{if(e.cancelable)e.preventDefault();const pos=getPos(e);if(tool==="cross"){setShapes(p=>[...p,{tool:"cross",color,x1:pos.x,y1:pos.y}]);return;}if(tool==="text"){setTDlg(pos);setTVal("");return;}setDraw(true);setStart(pos);setCur(pos);},[tool,color,getPos]);
   const onMove=useCallback((e)=>{if(!drawing)return;if(e.cancelable)e.preventDefault();setCur(getPos(e));},[drawing,getPos]);
-  const onUp=useCallback((e)=>{
-    if(!drawing||!startPt)return;if(e.cancelable)e.preventDefault();
-    const end=curPt||getPos(e);
-    setShapes(p=>[...p,{tool,color,x1:startPt.x,y1:startPt.y,x2:end.x,y2:end.y}]);
-    setDraw(false);setStart(null);setCur(null);
-  },[drawing,startPt,curPt,tool,color,getPos]);
-
-  const addText=()=>{
-    if(textVal.trim()&&textDlg)setShapes(p=>[...p,{tool:"text",color,x1:textDlg.x,y1:textDlg.y,text:textVal.trim()}]);
-    setTDlg(null);setTVal("");
-  };
-
+  const onUp=useCallback((e)=>{if(!drawing||!startPt)return;if(e.cancelable)e.preventDefault();const end=curPt||getPos(e);setShapes(p=>[...p,{tool,color,x1:startPt.x,y1:startPt.y,x2:end.x,y2:end.y}]);setDraw(false);setStart(null);setCur(null);},[drawing,startPt,curPt,tool,color,getPos]);
+  const addText=()=>{if(textVal.trim()&&textDlg)setShapes(p=>[...p,{tool:"text",color,x1:textDlg.x,y1:textDlg.y,text:textVal.trim()}]);setTDlg(null);setTVal("");};
   const doConfirm=()=>{const c=canvasRef.current;if(!c)return;const dUrl=c.toDataURL("image/jpeg",0.88);onConfirm(dUrl,dUrl.split(",")[1]);};
 
   const TOOLS=[{id:"arrow",icon:"↗",L:"Flecha"},{id:"circle",icon:"○",L:"Círculo"},{id:"rect",icon:"□",L:"Rect."},{id:"cross",icon:"✕",L:"Cruz"},{id:"text",icon:"T",L:"Texto"}];
@@ -348,8 +318,7 @@ function AnnotationEditor({imageUrl,onConfirm,onClose}) {
           <div className="absolute inset-0 bg-black/60 flex items-center justify-center z-10 p-4">
             <div className="bg-white rounded-2xl p-5 w-full max-w-sm shadow-2xl">
               <p className="text-sm font-bold text-gray-800 mb-3">✏️ Texto para la anotación</p>
-              <input autoFocus value={textVal} onChange={e=>setTVal(e.target.value)} onKeyDown={e=>e.key==="Enter"&&addText()}
-                className="w-full border-2 border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-amber-400 mb-4" placeholder="Ej: Sin conductor de tierra…"/>
+              <input autoFocus value={textVal} onChange={e=>setTVal(e.target.value)} onKeyDown={e=>e.key==="Enter"&&addText()} className="w-full border-2 border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-amber-400 mb-4" placeholder="Ej: Sin conductor de tierra…"/>
               <div className="flex gap-2">
                 <button onClick={()=>{setTDlg(null);setTVal("");}} className="flex-1 py-2.5 border-2 border-gray-200 rounded-xl text-sm font-bold text-gray-500">Cancelar</button>
                 <button onClick={addText} className="flex-1 py-2.5 rounded-xl text-sm font-bold text-white" style={{background:Y}}>Agregar →</button>
@@ -373,10 +342,7 @@ function AnnotationEditor({imageUrl,onConfirm,onClose}) {
         </div>
         <div className="flex items-center justify-center gap-3 pb-1">
           <span className="text-white/30 text-[11px] mr-1">Color:</span>
-          {COLS.map(c=>(
-            <button key={c} onClick={()=>setColor(c)} className="transition-all active:scale-90"
-              style={{width:26,height:26,borderRadius:"50%",background:c,outline:color===c?`3px solid ${Y}`:"3px solid transparent",outlineOffset:2,border:c==="#ffffff"?"2px solid rgba(255,255,255,0.25)":"none"}}/>
-          ))}
+          {COLS.map(c=><button key={c} onClick={()=>setColor(c)} className="transition-all active:scale-90" style={{width:26,height:26,borderRadius:"50%",background:c,outline:color===c?`3px solid ${Y}`:"3px solid transparent",outlineOffset:2,border:c==="#ffffff"?"2px solid rgba(255,255,255,0.25)":"none"}}/>)}
           <div className="w-6 h-6 rounded-full ml-1 border-2 border-white/30"><div className="w-full h-full rounded-full" style={{background:color}}/></div>
         </div>
       </div>
@@ -397,7 +363,6 @@ function FinalizarModal({informe,onConfirm,onClose}) {
   const [plazo,setPlazo]=useState(informe.plazo||"12 meses");
   const [notas,setNotas]=useState(informe.notas||"");
   const [saving,setSaving]=useState(false);
-  const [odStatus,setOdStatus]=useState(null); // null | "ok" | "error"
 
   const RES_CONFIG={
     "Aprobada"    :{color:"#16a34a",bg:"#f0fdf4",desc:"Instalación cumple con los requisitos normativos."},
@@ -408,19 +373,7 @@ function FinalizarModal({informe,onConfirm,onClose}) {
 
   const handleConfirm=async()=>{
     setSaving(true);
-    const data={resultado,plazo,notas};
-    // Guardar en OneDrive
-    try {
-      const updated={...informe,...data};
-      const r=await saveToOneDrive(updated);
-      setOdStatus(r.ok?"ok":"error");
-      if(r.ok) console.log("OneDrive folder:", r.folder);
-    } catch(e) {
-      console.warn("OneDrive:", e);
-      setOdStatus("error");
-    }
-    setSaving(false);
-    onConfirm(data);
+    onConfirm({resultado,plazo,notas});
   };
 
   return (
@@ -443,54 +396,35 @@ function FinalizarModal({informe,onConfirm,onClose}) {
               ))}
             </div>
           </div>
-
           {/* Sugerencia */}
           <div className="flex items-start gap-3 px-4 py-3 rounded-2xl border-2" style={{borderColor:cfg.color+"40",background:cfg.bg}}>
             <span className="text-lg mt-0.5">💡</span>
-            <div>
-              <p className="text-xs font-bold" style={{color:cfg.color}}>Resultado sugerido: {suggested}</p>
-              <p className="text-xs mt-0.5" style={{color:cfg.color+"cc"}}>{cfg.desc}</p>
-            </div>
+            <div><p className="text-xs font-bold" style={{color:cfg.color}}>Resultado sugerido: {suggested}</p><p className="text-xs mt-0.5" style={{color:cfg.color+"cc"}}>{cfg.desc}</p></div>
           </div>
-
-          {/* Selector resultado */}
+          {/* Selector */}
           <div>
             <label className="block text-xs font-bold text-gray-400 mb-3 uppercase tracking-wider">Resultado de la Verificación *</label>
             <div className="space-y-2.5">
-              {RESS.map(r=>{
-                const c=RES_CONFIG[r];const active=resultado===r;
-                return (
-                  <button key={r} onClick={()=>setRes(r)}
-                    className="w-full flex items-center gap-3 px-4 py-3.5 rounded-2xl border-2 text-left transition-all"
-                    style={{borderColor:active?c.color:"#e5e7eb",background:active?c.bg:"white"}}>
-                    <div className="w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0" style={{borderColor:active?c.color:"#d1d5db",background:active?c.color:"white"}}>
-                      {active&&<div className="w-2 h-2 rounded-full bg-white"/>}
-                    </div>
-                    <div className="flex-1">
-                      <p className="font-bold text-sm" style={{color:active?c.color:"#374151"}}>{r}</p>
-                      <p className="text-xs mt-0.5" style={{color:active?c.color+"aa":"#9ca3af"}}>{c.desc}</p>
-                    </div>
-                  </button>
-                );
-              })}
+              {RESS.map(r=>{const c=RES_CONFIG[r];const active=resultado===r;return(
+                <button key={r} onClick={()=>setRes(r)} className="w-full flex items-center gap-3 px-4 py-3.5 rounded-2xl border-2 text-left transition-all" style={{borderColor:active?c.color:"#e5e7eb",background:active?c.bg:"white"}}>
+                  <div className="w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0" style={{borderColor:active?c.color:"#d1d5db",background:active?c.color:"white"}}>{active&&<div className="w-2 h-2 rounded-full bg-white"/>}</div>
+                  <div className="flex-1"><p className="font-bold text-sm" style={{color:active?c.color:"#374151"}}>{r}</p><p className="text-xs mt-0.5" style={{color:active?c.color+"aa":"#9ca3af"}}>{c.desc}</p></div>
+                </button>
+              );})}
             </div>
           </div>
-
           {/* Plazo */}
           {resultado!=="Aprobada"&&(
             <div>
               <label className="block text-xs font-bold text-gray-400 mb-2 uppercase tracking-wider">Plazo para mejoras</label>
               <div className="flex gap-2 flex-wrap mb-2">
                 {["3 meses","6 meses","12 meses","18 meses","24 meses"].map(p=>(
-                  <button key={p} onClick={()=>setPlazo(p)}
-                    className="px-3 py-1.5 rounded-xl text-xs font-bold border-2 transition-all"
-                    style={{borderColor:plazo===p?Y:"#e5e7eb",background:plazo===p?Y+"15":"white",color:plazo===p?Y:"#6b7280"}}>{p}</button>
+                  <button key={p} onClick={()=>setPlazo(p)} className="px-3 py-1.5 rounded-xl text-xs font-bold border-2 transition-all" style={{borderColor:plazo===p?Y:"#e5e7eb",background:plazo===p?Y+"15":"white",color:plazo===p?Y:"#6b7280"}}>{p}</button>
                 ))}
               </div>
               <FI label="" value={plazo} onChange={e=>setPlazo(e.target.value)} placeholder="Ej: 12 meses"/>
             </div>
           )}
-
           {/* Notas */}
           <div>
             <label className="block text-xs font-bold text-gray-400 mb-2 uppercase tracking-wider">Notas adicionales</label>
@@ -498,21 +432,16 @@ function FinalizarModal({informe,onConfirm,onClose}) {
               placeholder="Ej: Requiere sistema de iluminación de emergencia en salida principal."
               className="w-full border-2 border-gray-100 rounded-xl px-3 py-2.5 text-sm bg-gray-50 resize-none focus:outline-none focus:border-amber-400 focus:bg-white transition-all"/>
           </div>
-
-          {/* OneDrive info */}
+          {/* Firebase note */}
           <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-blue-50 border border-blue-100">
-            <span>☁️</span>
-            <p className="text-xs text-blue-700 font-medium">
-              Las fotos y datos se guardarán en OneDrive → <span className="font-mono">Electrizar-Reportes/{informe.codigo}-...</span>
-            </p>
+            <span>🔄</span>
+            <p className="text-xs text-blue-700 font-medium">El informe se sincronizará automáticamente en todos los dispositivos.</p>
           </div>
-
           <button onClick={handleConfirm} disabled={saving}
             className="w-full py-4 rounded-2xl font-extrabold text-white text-base hover:opacity-90 active:scale-95 transition-all disabled:opacity-60"
             style={{background:resultado==="Aprobada"?"#16a34a":resultado==="Rechazada"?"#dc2626":Y}}>
-            {saving?"⏳ Guardando en OneDrive…":`Generar Reporte ${resultado} →`}
+            {saving?"⏳ Guardando…":`Generar Reporte ${resultado} →`}
           </button>
-          <p className="text-center text-xs text-gray-400">Podrás editar el resultado antes de imprimir el PDF.</p>
         </div>
       </div>
     </div>
@@ -522,8 +451,8 @@ function FinalizarModal({informe,onConfirm,onClose}) {
 /* ═══════════════════════════════════════════
    HOME
 ═══════════════════════════════════════════ */
-function HomeView({informes,onNew,onOpen,usuario,onLogout}) {
-  const sorted=[...informes].reverse();
+function HomeView({informes,loading,onNew,onOpen,usuario,onLogout}) {
+  const sorted=[...informes].sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
   return (
     <div className="min-h-screen" style={{background:"#f8f9fb"}}>
       <header style={{background:DARK}} className="px-4 py-4 sticky top-0 z-10 shadow-lg">
@@ -534,10 +463,8 @@ function HomeView({informes,onNew,onOpen,usuario,onLogout}) {
               <div className="text-white text-xs font-bold leading-tight">{usuario.nombre}</div>
               <button onClick={onLogout} className="text-white/40 hover:text-white/70 text-[10px] transition-colors">Cerrar sesión</button>
             </div>
-            <button onClick={onLogout} className="sm:hidden text-white/40 hover:text-white text-xs px-2 py-1 rounded-lg hover:bg-white/10">↩</button>
-            <button onClick={onNew}
-              className="flex items-center gap-1.5 px-4 py-2 rounded-xl font-bold text-sm text-gray-900 hover:opacity-90 active:scale-95"
-              style={{background:Y}}>
+            <button onClick={onLogout} className="sm:hidden text-white/40 hover:text-white text-xs px-2 py-1 rounded-lg hover:bg-white/10 transition-colors">↩</button>
+            <button onClick={onNew} className="flex items-center gap-1.5 px-4 py-2 rounded-xl font-bold text-sm text-gray-900 hover:opacity-90 active:scale-95" style={{background:Y}}>
               <span className="text-base leading-none">+</span> Nuevo
             </button>
           </div>
@@ -546,9 +473,14 @@ function HomeView({informes,onNew,onOpen,usuario,onLogout}) {
       <div className="p-4 max-w-2xl mx-auto">
         <div className="flex items-center justify-between mb-4 mt-1">
           <h2 className="font-bold text-gray-400 text-xs uppercase tracking-widest">Informes ({informes.length})</h2>
-          <span className="text-xs text-gray-300">☁️ OneDrive activo</span>
+          <span className="text-xs text-green-500 font-medium">🔄 En línea</span>
         </div>
-        {!sorted.length?(
+        {loading?(
+          <div className="flex items-center justify-center py-24 gap-3">
+            <div className="w-6 h-6 border-2 border-gray-200 border-t-amber-400 rounded-full animate-spin"/>
+            <span className="text-gray-400 text-sm">Cargando informes…</span>
+          </div>
+        ):!sorted.length?(
           <div className="text-center py-24">
             <div className="w-20 h-20 rounded-2xl mx-auto mb-5 flex items-center justify-center text-4xl" style={{background:Y+"22"}}>⚡</div>
             <p className="text-gray-400 mb-6 text-sm">No hay informes guardados aún.</p>
@@ -578,6 +510,7 @@ function HomeView({informes,onNew,onOpen,usuario,onLogout}) {
                   <div className="flex items-center gap-4 mt-3 pt-3 border-t border-gray-50 text-xs text-gray-400">
                     <span>📷 <b className="text-gray-600">{inf.elementos?.length||0}</b> elementos</span>
                     {alta>0&&<span className="font-bold text-red-400">🔴 {alta} alta prioridad</span>}
+                    <span className="text-gray-300 text-[10px]">{inf.ingeniero?.split(" ").slice(-2).join(" ")||""}</span>
                     <span className="ml-auto text-gray-300">→</span>
                   </div>
                 </div>
@@ -594,15 +527,12 @@ function HomeView({informes,onNew,onOpen,usuario,onLogout}) {
    NUEVO INFORME
 ═══════════════════════════════════════════ */
 function NuevoView({onCreate,onBack,usuario}) {
-  const [f,setF]=useState({
-    codigo:"",propietario:"",direccion:"",fecha:HOY,
-    ingeniero:usuario.nombre,matricula:usuario.matricula,
-  });
+  const [f,setF]=useState({codigo:"",propietario:"",direccion:"",fecha:HOY,ingeniero:usuario.nombre,matricula:usuario.matricula});
   const s=(k,v)=>setF(p=>({...p,[k]:v}));
   const go=()=>{
     if(!f.codigo.trim())return alert("El código de informe es requerido.\nEjemplo: INF-26-055");
     if(!f.propietario.trim())return alert("El nombre del propietario es requerido.");
-    onCreate({...f,id:Date.now(),elementos:[],resultado:null,plazo:"12 meses",notas:"",createdAt:new Date().toISOString()});
+    onCreate({...f,id:Date.now(),elementos:[],resultado:null,plazo:"12 meses",notas:"",createdAt:Date.now()});
   };
   return (
     <div className="min-h-screen" style={{background:"#f8f9fb"}}>
@@ -628,7 +558,7 @@ function NuevoView({onCreate,onBack,usuario}) {
         <div className="flex items-start gap-3 px-4 py-3.5 rounded-2xl border-2" style={{borderColor:Y+"40",background:Y+"0f"}}>
           <span className="text-lg mt-0.5">💡</span>
           <p className="text-xs leading-relaxed" style={{color:"#92400e"}}>
-            El <b>resultado de la verificación</b> se asigna al finalizar la inspección. Las fotos se guardarán automáticamente en <b>OneDrive</b>.
+            El <b>resultado de la verificación</b> se asigna al finalizar. El informe se guarda en la nube y se puede acceder desde cualquier dispositivo.
           </p>
         </div>
         <Btn onClick={go} full>Iniciar Inspección →</Btn>
@@ -644,19 +574,46 @@ function InspeccionView({informe,onUpdate,onBack,onFinalize,onPreview}) {
   const [modal,setModal]=useState(false);
   const [editIdx,setEditIdx]=useState(null);
   const [finalM,setFinalM]=useState(false);
+  const [syncing,setSyncing]=useState(false);
 
-  const saveEl=(el)=>{
+  const saveEl=async(el)=>{
     const els=[...(informe.elementos||[])];
     if(editIdx!==null)els[editIdx]={...el,num:editIdx+1};
     else els.push({...el,num:els.length+1});
-    onUpdate({...informe,elementos:els});setModal(false);
+    const updated={...informe,elementos:els};
+    setSyncing(true);
+    // Upload photo to Firebase Storage
+    if(el.url&&el.url.startsWith("data:")){
+      try{
+        const dlUrl=await uploadPhoto(informe.id,el.num,el.url);
+        const idx=editIdx!==null?editIdx:els.length-1;
+        els[idx]={...els[idx],url:dlUrl,b64:null};
+        updated.elementos=els;
+      }catch(e){console.warn("Photo upload:",e);}
+    }
+    await saveInformeFS(updated);
+    setSyncing(false);
+    onUpdate(updated);
+    setModal(false);
   };
-  const delEl=(i)=>{
+
+  const delEl=async(i)=>{
     if(!confirm("¿Eliminar este elemento?"))return;
     const els=informe.elementos.filter((_,j)=>j!==i).map((e,j)=>({...e,num:j+1}));
-    onUpdate({...informe,elementos:els});
+    const updated={...informe,elementos:els};
+    await saveInformeFS(updated);
+    onUpdate(updated);
   };
-  const handleFinalize=(data)=>{onFinalize(data);setFinalM(false);};
+
+  const handleFinalize=async(data)=>{
+    const updated={...informe,...data};
+    setSyncing(true);
+    await saveInformeFS(updated);
+    setSyncing(false);
+    onFinalize(updated);
+    setFinalM(false);
+  };
+
   const alta=(informe.elementos||[]).filter(e=>e.prioridad==="alta").length;
   const total=informe.elementos?.length||0;
 
@@ -667,6 +624,7 @@ function InspeccionView({informe,onUpdate,onBack,onFinalize,onPreview}) {
           <div className="flex items-center gap-2 mb-2">
             <button onClick={onBack} className="text-white/60 hover:text-white text-xl transition-colors">←</button>
             <Logo sm white/>
+            {syncing&&<div className="w-4 h-4 border-2 border-white/20 border-t-white/60 rounded-full animate-spin ml-1"/>}
           </div>
           <div className="flex items-start justify-between ml-1">
             <div>
@@ -715,8 +673,6 @@ function InspeccionView({informe,onUpdate,onBack,onFinalize,onPreview}) {
             </div>
           ))
         )}
-
-        {/* Finalizar card */}
         <div className={`rounded-2xl border-2 overflow-hidden ${informe.resultado?"border-green-200 bg-green-50":"border-dashed border-gray-200 bg-white"}`}>
           <div className="p-4">
             {informe.resultado?(
@@ -733,7 +689,7 @@ function InspeccionView({informe,onUpdate,onBack,onFinalize,onPreview}) {
             ):(
               <div>
                 <p className="font-bold text-gray-500 text-sm mb-1">¿Terminaste de fotografiar?</p>
-                <p className="text-xs text-gray-400 mb-4">Al finalizar se asignará el resultado y las fotos se subirán a OneDrive.</p>
+                <p className="text-xs text-gray-400 mb-4">Al finalizar se asignará el resultado y el informe quedará disponible en todos los dispositivos.</p>
                 <button onClick={()=>{if(total===0){alert("Agrega al menos un elemento antes de finalizar.");return;}setFinalM(true);}}
                   className="w-full py-3.5 rounded-xl font-extrabold text-white text-sm hover:opacity-90 active:scale-95 transition-all"
                   style={{background:DARK}}>
@@ -744,11 +700,9 @@ function InspeccionView({informe,onUpdate,onBack,onFinalize,onPreview}) {
           </div>
         </div>
       </div>
-
       <button onClick={()=>{setEditIdx(null);setModal(true);}}
         className="fixed bottom-6 right-6 w-14 h-14 rounded-2xl shadow-2xl text-white text-3xl flex items-center justify-center z-20 active:scale-90 hover:opacity-90 transition-all"
         style={{background:Y}}>+</button>
-
       {modal&&<ElementoModal el={editIdx!==null?informe.elementos[editIdx]:null} num={editIdx!==null?editIdx+1:(informe.elementos?.length||0)+1} onSave={saveEl} onClose={()=>setModal(false)}/>}
       {finalM&&<FinalizarModal informe={informe} onConfirm={handleFinalize} onClose={()=>setFinalM(false)}/>}
     </div>
@@ -771,7 +725,7 @@ function ElementoModal({el,num,onSave,onClose}) {
   const fRef=useRef();
 
   const onPhoto=async(e)=>{const f=e.target.files[0];if(!f)return;setErr(null);try{const{url:u}=await processPhoto(f);setAnn(u);}catch{setErr("Error al procesar la imagen.");}};
-  const onAnnotConfirm=(finalUrl,finalB64)=>{setUrl(finalUrl);setB64(finalB64);setAnn(null);if(titulo.trim())analyze(finalB64);else setErr("Foto guardada. Escribe el título y toca Analizar IA.");};
+  const onAnnotConfirm=(finalUrl,finalB64)=>{setUrl(finalUrl);setB64(finalB64);setAnn(null);if(titulo.trim())analyze(finalB64);else setErr("Foto guardada. Escribe el título y toca IA NEC.");};
   const analyze=async(b=b64)=>{
     if(!b){setErr("Primero adjunta una fotografía.");return;}
     if(!titulo.trim()){setErr("Escribe el título antes de analizar.");return;}
@@ -829,7 +783,7 @@ function ElementoModal({el,num,onSave,onClose}) {
 }
 
 /* ═══════════════════════════════════════════
-   PREVIEW
+   PREVIEW / PDF
 ═══════════════════════════════════════════ */
 const RPage=({children,page,total,nEl})=>(
   <div className="rp bg-white rounded-2xl shadow-md overflow-hidden" style={{minHeight:"21cm"}}>
@@ -883,11 +837,10 @@ function PreviewView({informe,onBack}) {
           {(informe.elementos||[]).map((el,i)=>(
             <RPage key={i} page={i+3} total={total} nEl={nEl}>
               <div className="flex gap-5">
-                {el.url?<img src={el.url} alt={el.titulo} className="w-52 h-48 object-cover rounded-2xl border border-gray-200 shrink-0"/>:<div className="w-52 h-48 bg-gray-100 rounded-2xl shrink-0 flex items-center justify-center text-4xl">📷</div>}
+                {el.url?<img src={el.url} alt={el.titulo} className="w-52 h-48 object-cover rounded-2xl border border-gray-200 shrink-0" crossOrigin="anonymous"/>:<div className="w-52 h-48 bg-gray-100 rounded-2xl shrink-0 flex items-center justify-center text-4xl">📷</div>}
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 mb-3 flex-wrap">
-                    <span className="font-bold text-gray-900 text-sm">Título: {el.titulo}</span>
-                    <Badge v={el.prioridad}/>
+                    <span className="font-bold text-gray-900 text-sm">Título: {el.titulo}</span><Badge v={el.prioridad}/>
                   </div>
                   <p className="font-bold text-xs text-gray-700 mb-1">Hallazgos:</p>
                   {(el.hallazgos||[]).map((h,j)=><p key={j} className="text-xs text-gray-700 leading-relaxed">-{h}</p>)}
@@ -922,23 +875,47 @@ function PreviewView({informe,onBack}) {
    ROOT
 ═══════════════════════════════════════════ */
 export default function App() {
-  const [view,  setV]     = useState("login");
-  const [usuario,setUsr]  = useState(()=>sto.get("e_usr")||null);
-  const [informes,setI]   = useState(()=>sto.get("e_infs")||[]);
-  const [active, setAct]  = useState(null);
+  const [view,    setV]    = useState("login");
+  const [usuario, setUsr]  = useState(()=>lsto.get("e_usr")||null);
+  const [informes,setI]    = useState([]);
+  const [loading, setLoad] = useState(true);
+  const [active,  setAct]  = useState(null);
 
-  useEffect(()=>{ if(usuario)setV("home"); },[]);
+  /* Firestore real-time listener */
+  useEffect(()=>{
+    if(!usuario){setLoad(false);return;}
+    const q=query(collection(db,"informes"),orderBy("createdAt","desc"));
+    const unsub=onSnapshot(q,(snap)=>{
+      const data=snap.docs.map(d=>({...d.data(),id:d.id}));
+      setI(data);setLoad(false);
+    },(err)=>{console.error("Firestore:",err);setLoad(false);});
+    return ()=>unsub();
+  },[usuario]);
 
-  const persist=(list)=>{ setI(list); sto.set("e_infs",list); };
-  const login=(u)=>{ sto.set("e_usr",u); setUsr(u); setV("home"); };
-  const logout=()=>{ sto.set("e_usr",null); setUsr(null); setV("login"); };
-  const create=(data)=>{ persist([...informes,data]); setAct(data); setV("insp"); };
-  const update=(inf)=>{ const l=informes.map(i=>i.id===inf.id?inf:i); persist(l); setAct(inf); };
-  const open=(inf)=>{ setAct(inf); setV("insp"); };
-  const finalize=(data)=>{ const inf={...active,...data}; update(inf); setAct(inf); setV("prev"); };
+  useEffect(()=>{ if(usuario)setV("home"); },[usuario]);
+
+  const login=(u)=>{lsto.set("e_usr",u);setUsr(u);setV("home");};
+  const logout=()=>{lsto.set("e_usr",null);setUsr(null);setV("login");};
+
+  const create=async(data)=>{
+    await saveInformeFS(data);
+    setAct(data);setV("insp");
+  };
+
+  const update=(inf)=>{
+    setI(prev=>prev.map(i=>String(i.id)===String(inf.id)?inf:i));
+    setAct(inf);
+  };
+
+  const open=(inf)=>{setAct(inf);setV("insp");};
+
+  const finalize=(inf)=>{
+    setI(prev=>prev.map(i=>String(i.id)===String(inf.id)?inf:i));
+    setAct(inf);setV("prev");
+  };
 
   if(view==="login")  return <LoginView onLogin={login}/>;
-  if(view==="home")   return <HomeView informes={informes} onNew={()=>setV("nuevo")} onOpen={open} usuario={usuario} onLogout={logout}/>;
+  if(view==="home")   return <HomeView informes={informes} loading={loading} onNew={()=>setV("nuevo")} onOpen={open} usuario={usuario} onLogout={logout}/>;
   if(view==="nuevo")  return <NuevoView onCreate={create} onBack={()=>setV("home")} usuario={usuario}/>;
   if(view==="insp")   return <InspeccionView informe={active} onUpdate={update} onBack={()=>setV("home")} onFinalize={finalize} onPreview={()=>setV("prev")}/>;
   if(view==="prev")   return <PreviewView informe={active} onBack={()=>setV("insp")}/>;
