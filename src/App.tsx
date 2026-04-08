@@ -636,9 +636,26 @@ function FinalizarModal({informe,onConfirm,onClose}) {
    HOME
 ═══════════════════════════════════════════ */
 function HomeView({informes,loading,onNew,onOpen,usuario,onLogout}) {
-  const [delTarget,setDel]=useState(null);
-  const sorted=[...informes].sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
-  const tipoBadge=(t)=>t==="ac"?{label:"AC",bg:"#0c4a6e",color:"#38bdf8"}:t==="inspeccion"?{label:"Inspección",bg:DARK+"22",color:DARK}:{label:"Verificación",bg:Y+"22",color:Y};
+  const [delTarget,setDel] = useState(null);
+  const [tabActiva,setTab] = useState("todos");
+
+  const TABS = [
+    { id:"todos",        label:"Todos",        icon:"📋" },
+    { id:"verificacion", label:"Verificación", icon:"🔍" },
+    { id:"inspeccion",   label:"Inspección",   icon:"⚡" },
+    { id:"ac",           label:"Aires AC",     icon:"🌡️" },
+  ];
+
+  const filtrados = [...informes]
+    .sort((a,b)=>(b.createdAt||0)-(a.createdAt||0))
+    .filter(inf => tabActiva === "todos" || inf.tipo === tabActiva);
+
+  const conteo = (tipo) => informes.filter(i => tipo === "todos" ? true : i.tipo === tipo).length;
+
+  const tipoBadge = (t) =>
+    t==="ac"          ? {label:"Aires AC",      bg:"#0c4a6e22", color:"#0369a1"} :
+    t==="inspeccion"  ? {label:"Inspección",    bg:DARK+"18",   color:DARK      } :
+                        {label:"Verificación",  bg:Y+"22",      color:Y         };
 
   return (
     <div className="min-h-screen" style={{background:"#f8f9fb"}}>
@@ -656,37 +673,74 @@ function HomeView({informes,loading,onNew,onOpen,usuario,onLogout}) {
             </button>
           </div>
         </div>
+
+        {/* Tabs */}
+        <div className="max-w-2xl mx-auto mt-3 flex gap-1.5 overflow-x-auto pb-0.5 scrollbar-hide">
+          {TABS.map(t=>(
+            <button key={t.id} onClick={()=>setTab(t.id)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all flex-shrink-0 ${tabActiva===t.id?"text-gray-900":"text-white/50 hover:text-white/80"}`}
+              style={tabActiva===t.id?{background:Y}:{background:"rgba(255,255,255,0.08)"}}>
+              <span>{t.icon}</span>
+              <span>{t.label}</span>
+              <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-extrabold ${tabActiva===t.id?"bg-black/20 text-gray-900":"bg-white/10 text-white/60"}`}>
+                {conteo(t.id)}
+              </span>
+            </button>
+          ))}
+        </div>
       </header>
+
       <div className="p-4 max-w-2xl mx-auto">
         <div className="flex items-center justify-between mb-4 mt-1">
-          <h2 className="font-bold text-gray-400 text-xs uppercase tracking-widest">Informes ({informes.length})</h2>
+          <h2 className="font-bold text-gray-400 text-xs uppercase tracking-widest">
+            {TABS.find(t=>t.id===tabActiva)?.label} ({filtrados.length})
+          </h2>
           <span className="text-xs text-green-500 font-medium">🔄 En línea</span>
         </div>
-        {loading?(
+
+        {loading ? (
           <div className="flex items-center justify-center py-24 gap-3">
             <div className="w-6 h-6 border-2 border-gray-200 border-t-amber-400 rounded-full animate-spin"/>
             <span className="text-gray-400 text-sm">Cargando informes…</span>
           </div>
-        ):!sorted.length?(
-          <div className="text-center py-24">
-            <div className="w-20 h-20 rounded-2xl mx-auto mb-5 flex items-center justify-center text-4xl" style={{background:Y+"22"}}>⚡</div>
-            <p className="text-gray-400 mb-6 text-sm">No hay informes. Toca <b>+ Nuevo</b>.</p>
+        ) : !filtrados.length ? (
+          <div className="text-center py-20">
+            <div className="w-20 h-20 rounded-2xl mx-auto mb-5 flex items-center justify-center text-4xl"
+              style={{background:Y+"22"}}>
+              {TABS.find(t=>t.id===tabActiva)?.icon}
+            </div>
+            <p className="text-gray-400 text-sm mb-6">
+              {tabActiva==="todos"
+                ? "No hay informes. Toca + Nuevo para comenzar."
+                : `No hay informes de ${TABS.find(t=>t.id===tabActiva)?.label}.`}
+            </p>
+            {tabActiva==="todos" && <Btn onClick={onNew}>Crear primer informe</Btn>}
           </div>
-        ):(
+        ) : (
           <div className="space-y-3">
-            {sorted.map(inf=>{
-              const tb=tipoBadge(inf.tipo);
-              const nElementos=inf.tipo==="ac"?inf.equipos?.length||0:inf.elementos?.length||0;
-              const aprobados=inf.tipo==="ac"?(inf.equipos||[]).filter(e=>e.resultado==="Aprobado").length:null;
+            {filtrados.map(inf=>{
+              const tb = tipoBadge(inf.tipo);
+              const nEl = inf.tipo==="ac" ? inf.equipos?.length||0 : inf.elementos?.length||0;
+              const aprobadosAC = inf.tipo==="ac" ? (inf.equipos||[]).filter(e=>e.resultado==="Aprobado").length : null;
+              const altaCount = inf.tipo!=="ac" ? (inf.elementos||[]).filter(e=>e.prioridad==="alta").length : 0;
+
               return (
                 <div key={inf.id} className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+                  {/* Franja de color por tipo */}
+                  <div className="h-1 w-full" style={{
+                    background: inf.tipo==="ac" ? "#38bdf8" : inf.tipo==="inspeccion" ? DARK : Y
+                  }}/>
                   <div onClick={()=>onOpen(inf)} className="p-4 cursor-pointer hover:bg-gray-50 active:bg-gray-100 transition-colors">
                     <div className="flex justify-between gap-3">
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2 flex-wrap mb-0.5">
                           <div className="font-mono text-[11px] text-gray-300 tracking-wider">{inf.codigo}</div>
-                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full" style={{background:tb.bg,color:tb.color}}>{tb.label}</span>
-                          {!inf.resultado&&inf.tipo!=="ac"&&<span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-50 text-blue-500 border border-blue-100">En curso</span>}
+                          {tabActiva==="todos" && (
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full"
+                              style={{background:tb.bg, color:tb.color}}>{tb.label}</span>
+                          )}
+                          {!inf.resultado && inf.tipo!=="ac" &&
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-50 text-blue-500 border border-blue-100">En curso</span>}
                         </div>
                         <div className="font-bold text-gray-800 truncate text-sm">{inf.propietario||"Sin nombre"}</div>
                         <div className="text-xs text-gray-400 truncate">{inf.direccion}</div>
@@ -697,17 +751,32 @@ function HomeView({informes,loading,onNew,onOpen,usuario,onLogout}) {
                       </div>
                     </div>
                     <div className="flex items-center gap-4 mt-3 pt-3 border-t border-gray-50 text-xs text-gray-400">
-                      {inf.tipo==="ac"
-                        ? <><span>🌡️ <b className="text-gray-600">{nElementos}</b> equipos</span>{aprobados!==null&&<span className="text-green-500 font-bold">✅ {aprobados}/{nElementos} aprobados</span>}</>
-                        : <span>📷 <b className="text-gray-600">{nElementos}</b> elementos</span>}
+                      {inf.tipo==="ac" ? (
+                        <>
+                          <span>🌡️ <b className="text-gray-600">{nEl}</b> equipos</span>
+                          {aprobadosAC!==null && <span className="text-green-500 font-bold">✅ {aprobadosAC}/{nEl}</span>}
+                        </>
+                      ) : (
+                        <>
+                          <span>📷 <b className="text-gray-600">{nEl}</b> elementos</span>
+                          {altaCount>0 && <span className="font-bold text-red-400">🔴 {altaCount} alta prioridad</span>}
+                        </>
+                      )}
+                      <span className="text-[10px] text-gray-300 ml-auto">{inf.tipo==="ac"?inf.tecnico:inf.ingeniero}</span>
                     </div>
                   </div>
                   <div className="flex border-t border-gray-50 divide-x divide-gray-50 text-xs">
-                    {inf.resultado&&(
-                      <button onClick={()=>inf.tipo==="ac"?generatePDFAC(inf):generatePDFElectrico(inf)}
-                        className="flex-1 py-2.5 text-gray-500 hover:bg-gray-50 font-semibold transition-colors flex items-center justify-center gap-1">🖨️ PDF</button>
+                    {inf.resultado && (
+                      <button
+                        onClick={()=>inf.tipo==="ac" ? generatePDFAC(inf) : generatePDFElectrico(inf)}
+                        className="flex-1 py-2.5 text-gray-500 hover:bg-gray-50 font-semibold transition-colors flex items-center justify-center gap-1">
+                        🖨️ PDF
+                      </button>
                     )}
-                    <button onClick={()=>setDel(inf)} className="flex-1 py-2.5 text-red-400 hover:bg-red-50 font-semibold transition-colors flex items-center justify-center gap-1">🗑️ Eliminar</button>
+                    <button onClick={()=>setDel(inf)}
+                      className="flex-1 py-2.5 text-red-400 hover:bg-red-50 font-semibold transition-colors flex items-center justify-center gap-1">
+                      🗑️ Eliminar
+                    </button>
                   </div>
                 </div>
               );
@@ -715,7 +784,7 @@ function HomeView({informes,loading,onNew,onOpen,usuario,onLogout}) {
           </div>
         )}
       </div>
-      {delTarget&&<DeleteModal informe={delTarget} onConfirm={()=>setDel(null)} onClose={()=>setDel(null)}/>}
+      {delTarget && <DeleteModal informe={delTarget} onConfirm={()=>setDel(null)} onClose={()=>setDel(null)}/>}
     </div>
   );
 }
