@@ -47,10 +47,10 @@ const RESULTADOS_INSPECCION   = ["Aprobada","No Aprobada"];
 
 /* 4 fotos fijas por equipo AC */
 const AC_FOTOS = [
-  { key:"evaporadora",    label:"Unidad Evaporadora",                  icon:"❄️",  hint:"Foto de la unidad evaporadora" },
-  { key:"condensadora",   label:"Condensadora siendo lavada",           icon:"💧",  hint:"Foto durante el lavado de la condensadora" },
-  { key:"presiones",      label:"Presiones de la condensadora",         icon:"🔵",  hint:"Foto del manómetro con las presiones" },
-  { key:"placa",          label:"Placa y amperaje de la condensadora",  icon:"⚡",  hint:"Foto de la placa de datos y medición de amperaje" },
+  { key:"evaporadora",  label:"Limpieza de evaporadora",          icon:"❄️", hint:"Foto durante la limpieza de la unidad evaporadora" },
+  { key:"condensadora", label:"Limpieza de condensadora",          icon:"💧", hint:"Foto durante la limpieza de la unidad condensadora" },
+  { key:"tuberia",      label:"Estado de tubería y aislante",      icon:"🔧", hint:"Foto del estado de la tubería y el aislamiento térmico" },
+  { key:"presiones",    label:"Nivel de presión de refrigerante",  icon:"🔵", hint:"Foto del manómetro con las presiones del sistema" },
 ];
 
 const HOY   = new Date().toISOString().split("T")[0];
