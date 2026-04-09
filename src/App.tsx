@@ -108,7 +108,7 @@ const generatePDFElectrico = (informe) => {
     @page { size: letter landscape; margin: 0; }
     * { box-sizing:border-box; margin:0; padding:0; }
     body { font-family:Arial,Helvetica,sans-serif; font-size:9pt; color:#222; background:white; }
-    .pg { width:216mm; min-height:279mm; padding:14mm 16mm 12mm 16mm; page-break-after:always; display:flex; flex-direction:column; }
+    .pg { width:279mm; height:216mm; padding:10mm 14mm 8mm 14mm; page-break-after:always; display:flex; flex-direction:column; overflow:hidden; }
     .pg:last-child { page-break-after:avoid; }
     .hdr { display:flex; justify-content:space-between; align-items:flex-start; padding-bottom:8px; border-bottom:2px solid #e5e7eb; margin-bottom:4px; }
     .logo-wrap { display:flex; align-items:center; gap:7px; }
@@ -117,7 +117,7 @@ const generatePDFElectrico = (informe) => {
     .logo-sub  { font-size:7.5pt; color:#F5A800; font-weight:600; }
     .hdr-info  { text-align:right; font-size:7.5pt; color:#555; line-height:1.7; }
     .hdr-div   { border-top:1px solid #d1d5db; margin-bottom:10px; }
-    .ftr { margin-top:auto; padding-top:8px; border-top:2px solid #e5e7eb; display:flex; justify-content:space-between; align-items:center; }
+    .ftr { margin-top:auto; padding-top:6px; border-top:2px solid #e5e7eb; display:flex; justify-content:space-between; align-items:center; flex-shrink:0; }
     .ftr-pg { font-size:7.5pt; color:#9ca3af; }
     .cover-body { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; padding:20px 0; }
     .cover-icon { font-size:48pt; margin-bottom:20px; }
@@ -144,7 +144,7 @@ const generatePDFElectrico = (informe) => {
     .close-body h2 { font-size:13pt; font-weight:900; margin-bottom:14px; }
     .close-row { font-size:10pt; line-height:2.1; color:#333; }
     .sig-line { border-bottom:2px solid #aaa; width:220px; margin-top:50px; margin-bottom:8px; }
-    @media print { body { -webkit-print-color-adjust:exact; print-color-adjust:exact; } }
+    @media print { body { -webkit-print-color-adjust:exact; print-color-adjust:exact; } .pg { height:216mm !important; overflow:hidden !important; } }
   `;
 
   const svgLogo = `<svg viewBox="0 0 22 22" width="18" height="18" fill="white"><rect x="2" y="2" width="18" height="3"/><rect x="2" y="8.5" width="11" height="3"/><rect x="2" y="15" width="18" height="3"/><polygon points="14,8.5 18,8.5 15,12.5 19,12.5 12,20 13,13.5 9,13.5"/></svg>`;
@@ -188,7 +188,7 @@ const generatePDFAC = (informe) => {
     @page { size: letter landscape; margin: 0; }
     * { box-sizing:border-box; margin:0; padding:0; }
     body { font-family:Arial,Helvetica,sans-serif; font-size:9pt; color:#222; background:white; }
-    .pg { width:216mm; min-height:279mm; padding:14mm 16mm 12mm 16mm; page-break-after:always; display:flex; flex-direction:column; }
+    .pg { width:279mm; height:216mm; padding:10mm 14mm 8mm 14mm; page-break-after:always; display:flex; flex-direction:column; overflow:hidden; }
     .pg:last-child { page-break-after:avoid; }
     .hdr { display:flex; justify-content:space-between; align-items:flex-start; padding-bottom:8px; border-bottom:2px solid #e5e7eb; margin-bottom:4px; }
     .logo-wrap { display:flex; align-items:center; gap:7px; }
@@ -197,7 +197,7 @@ const generatePDFAC = (informe) => {
     .logo-sub  { font-size:7.5pt; color:#F5A800; font-weight:600; }
     .hdr-info  { text-align:right; font-size:7.5pt; color:#555; line-height:1.7; }
     .hdr-div   { border-top:1px solid #d1d5db; margin-bottom:10px; }
-    .ftr { margin-top:auto; padding-top:8px; border-top:2px solid #e5e7eb; display:flex; justify-content:space-between; align-items:center; }
+    .ftr { margin-top:auto; padding-top:6px; border-top:2px solid #e5e7eb; display:flex; justify-content:space-between; align-items:center; flex-shrink:0; }
     .ftr-pg { font-size:7.5pt; color:#9ca3af; }
     /* PORTADA */
     .cover-body { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; padding:20px 0; }
@@ -228,7 +228,7 @@ const generatePDFAC = (informe) => {
     .sum-num { font-size:22pt; font-weight:900; }
     .sum-lbl { font-size:8pt; color:#666; margin-top:2px; }
     .sig-line { border-bottom:2px solid #aaa; width:220px; margin-top:40px; margin-bottom:8px; }
-    @media print { body { -webkit-print-color-adjust:exact; print-color-adjust:exact; } }
+    @media print { body { -webkit-print-color-adjust:exact; print-color-adjust:exact; } .pg { height:216mm !important; overflow:hidden !important; } }
   `;
 
   const svgLogo = `<svg viewBox="0 0 22 22" width="18" height="18" fill="white"><rect x="2" y="2" width="18" height="3"/><rect x="2" y="8.5" width="11" height="3"/><rect x="2" y="15" width="18" height="3"/><polygon points="14,8.5 18,8.5 15,12.5 19,12.5 12,20 13,13.5 9,13.5"/></svg>`;
