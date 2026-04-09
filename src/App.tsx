@@ -105,7 +105,7 @@ const generatePDFElectrico = (informe) => {
   const tipoLabel = informe.tipo === "inspeccion" ? "Inspección" : "Verificación";
 
   const css = `
-    @page { size: letter portrait; margin: 0; }
+    @page { size: letter landscape; margin: 0; }
     * { box-sizing:border-box; margin:0; padding:0; }
     body { font-family:Arial,Helvetica,sans-serif; font-size:9pt; color:#222; background:white; }
     .pg { width:216mm; min-height:279mm; padding:14mm 16mm 12mm 16mm; page-break-after:always; display:flex; flex-direction:column; }
@@ -185,7 +185,7 @@ const generatePDFAC = (informe) => {
   const totalPags = nEq + 2; // portada + resumen general + equipos
 
   const css = `
-    @page { size: letter portrait; margin: 0; }
+    @page { size: letter landscape; margin: 0; }
     * { box-sizing:border-box; margin:0; padding:0; }
     body { font-family:Arial,Helvetica,sans-serif; font-size:9pt; color:#222; background:white; }
     .pg { width:216mm; min-height:279mm; padding:14mm 16mm 12mm 16mm; page-break-after:always; display:flex; flex-direction:column; }
