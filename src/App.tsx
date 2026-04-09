@@ -1,7 +1,10 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { initializeApp } from "firebase/app";
 import {
-  getFirestore, collection, doc, setDoc,
+  initializeFirestore,
+  persistentLocalCache,
+  persistentMultipleTabManager,
+  collection, doc, setDoc,
   onSnapshot, query, orderBy, deleteDoc, serverTimestamp,
 } from "firebase/firestore";
 
@@ -17,7 +20,11 @@ const firebaseConfig = {
   appId: "1:664280211024:web:41da18e05445ab15af3b55",
 };
 const fbApp = initializeApp(firebaseConfig);
-const db    = getFirestore(fbApp);
+const db    = initializeFirestore(fbApp, {
+  localCache: persistentLocalCache({
+    tabManager: persistentMultipleTabManager()
+  })
+});
 
 const saveInformeFS  = async (inf) => { await setDoc(doc(db,"informes",String(inf.id)),{...inf,updatedAt:serverTimestamp()}); };
 const deleteInformeFS = async (id)  => { await deleteDoc(doc(db,"informes",String(id))); };
@@ -591,6 +598,8 @@ function FinalizarModal({informe,onConfirm,onClose}) {
 function HomeView({informes,loading,onNew,onOpen,usuario,onLogout}) {
   const [delTarget,setDel] = useState(null);
   const [tabActiva,setTab] = useState("todos");
+  const [online, setOnline] = useState(navigator.onLine);
+  useEffect(()=>{const on=()=>setOnline(true);const off=()=>setOnline(false);window.addEventListener("online",on);window.addEventListener("offline",off);return()=>{window.removeEventListener("online",on);window.removeEventListener("offline",off);};},[]);
 
   const TABS = [
     { id:"todos",        label:"Todos",        icon:"📋" },
@@ -648,7 +657,9 @@ function HomeView({informes,loading,onNew,onOpen,usuario,onLogout}) {
           <h2 className="font-bold text-gray-400 text-xs uppercase tracking-widest">
             {TABS.find(t=>t.id===tabActiva)?.label} ({filtrados.length})
           </h2>
-          <span className="text-xs text-green-500 font-medium">🔄 En línea</span>
+          <span className={`text-xs font-medium ${online ? "text-green-500" : "text-amber-400"}`}>
+          {online ? "🔄 En línea" : "📵 Sin conexión"}
+          </span>
         </div>
 
         {loading ? (
