@@ -29,6 +29,7 @@ const USUARIOS = [
 ];
 
 /* ─── CONSTANTES ─── */
+import { LOGO_ICON, LOGO_FULL } from "./logos";
 const Y    = "#F5A800";
 const DARK = "#111827";
 const CO   = { nombre: "Electrizar Electromecánica SRL", tel: "4001-7246", correo: "amontiel@electrizarcr.com", dir: "Calle Blancos, Goicoechea, San José, Costa Rica." };
@@ -91,65 +92,65 @@ const generatePDFElectrico = (informe) => {
   const tipoLabel = informe.tipo === "inspeccion" ? "Inspección" : "Verificación";
 
   const css = `
-    @page { size: letter portrait; margin: 0; }
+    @page { size: letter landscape; margin: 0; }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: Arial, Helvetica, sans-serif; font-size: 9pt; color: #222; background: white; }
-    .pg { width: 216mm; padding: 16mm 18mm 12mm 18mm; page-break-after: always; }
+    .pg { width: 279mm; padding: 12mm 16mm 10mm 16mm; page-break-after: always; }
     .pg:last-child { page-break-after: avoid; }
-    .hdr { display:flex; justify-content:space-between; align-items:flex-start; padding-bottom:8px; border-bottom:2px solid #e5e7eb; margin-bottom:10px; }
-    .logo-sm { display:flex; align-items:center; gap:7px; }
-    .logo-box { width:28px; height:28px; background:#F5A800; border-radius:4px; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
-    .logo-name { font-weight:900; font-size:10.5pt; line-height:1.2; color:#111; }
-    .logo-sub  { font-size:7pt; color:#F5A800; font-weight:600; }
+    .hdr { display:flex; justify-content:space-between; align-items:center; padding-bottom:7px; border-bottom:2px solid #e5e7eb; margin-bottom:10px; }
+    .hdr-logo { height:32px; width:auto; display:block; }
     .hdr-info  { text-align:right; font-size:7.5pt; color:#555; line-height:1.7; }
-    .ftr { display:flex; justify-content:space-between; align-items:flex-end; margin-top:18px; padding-top:8px; border-top:2px solid #e5e7eb; }
-    .logo-full { display:flex; align-items:center; gap:8px; }
-    .logo-full-box { width:34px; height:34px; background:#F5A800; border-radius:4px; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
-    .logo-full-name { font-weight:900; font-size:13pt; line-height:1.1; color:#111; }
-    .logo-full-sub  { font-size:7.5pt; color:#F5A800; font-weight:600; }
+    .ftr { display:flex; justify-content:space-between; align-items:center; margin-top:16px; padding-top:7px; border-top:2px solid #e5e7eb; }
+    .ftr-logo { height:36px; width:auto; display:block; }
     .ftr-pg { font-size:8pt; color:#9ca3af; }
     /* portada */
-    .cover { padding:20mm 18mm 12mm 18mm; }
-    .cover-hdr { margin-bottom:50px; }
-    .cover-title { font-size:26pt; font-weight:900; color:#111; line-height:1.25; margin-bottom:14px; }
-    .cover-sub   { font-size:10pt; color:#555; line-height:1.6; margin-bottom:32px; }
-    .cover-table { border-top:3px solid #111; border-bottom:3px solid #111; padding:16px 0; }
-    .cover-row   { display:flex; margin-bottom:6px; font-size:10pt; }
+    .cover { padding:14mm 16mm 10mm 16mm; }
+    .cover-hdr { margin-bottom:30px; }
+    .cover-title { font-size:24pt; font-weight:900; color:#111; line-height:1.25; margin-bottom:10px; }
+    .cover-sub   { font-size:10pt; color:#555; line-height:1.6; margin-bottom:24px; }
+    .cover-table { border-top:3px solid #111; border-bottom:3px solid #111; padding:12px 0; }
+    .cover-row   { display:flex; margin-bottom:5px; font-size:10pt; }
     .cover-lbl   { font-weight:700; width:170px; flex-shrink:0; }
     .cover-val   { color:#333; }
     /* limitaciones */
-    .lim h2 { font-size:12pt; font-weight:900; margin-bottom:14px; }
-    .lim p  { font-size:8.5pt; line-height:1.65; color:#444; margin-bottom:10px; }
+    .lim h2 { font-size:12pt; font-weight:900; margin-bottom:12px; }
+    .lim p  { font-size:8.5pt; line-height:1.65; color:#444; margin-bottom:9px; }
     /* elemento */
-    .el-row   { display:flex; gap:18px; }
-    .el-photo { width:200px; height:200px; object-fit:cover; border-radius:7px; border:1px solid #e5e7eb; flex-shrink:0; display:block; }
-    .el-empty { width:200px; height:200px; background:#f3f4f6; border-radius:7px; flex-shrink:0; display:flex; align-items:center; justify-content:center; font-size:32pt; color:#d1d5db; }
-    .el-num   { font-size:7pt; color:#bbb; text-align:right; margin-top:4px; }
+    .el-row   { display:flex; gap:16px; }
+    .el-photo { width:210px; height:210px; object-fit:cover; border-radius:7px; border:1px solid #e5e7eb; flex-shrink:0; display:block; }
+    .el-empty { width:210px; height:210px; background:#f3f4f6; border-radius:7px; flex-shrink:0; display:flex; align-items:center; justify-content:center; font-size:32pt; color:#d1d5db; }
+    .el-num   { font-size:7pt; color:#bbb; text-align:right; margin-top:3px; }
     .el-text  { flex:1; min-width:0; }
-    .el-title-row { display:flex; align-items:center; gap:8px; margin-bottom:10px; flex-wrap:wrap; }
+    .el-title-row { display:flex; align-items:center; gap:8px; margin-bottom:8px; flex-wrap:wrap; }
     .el-title { font-weight:900; font-size:10.5pt; color:#111; }
     .badge    { font-size:7.5pt; font-weight:700; padding:2px 9px; border-radius:20px; border:1px solid; display:inline-block; }
     .b-alta   { background:#fef2f2; color:#dc2626; border-color:#fecaca; }
     .b-normal { background:#fffbeb; color:#d97706; border-color:#fde68a; }
     .b-baja   { background:#f0fdf4; color:#16a34a; border-color:#bbf7d0; }
-    .sec-lbl  { font-weight:700; font-size:8.5pt; color:#374151; margin-top:8px; margin-bottom:3px; }
+    .sec-lbl  { font-weight:700; font-size:8.5pt; color:#374151; margin-top:7px; margin-bottom:3px; }
     .item-line { font-size:8.5pt; color:#444; line-height:1.6; }
-    /* cierre */
-    .close h2  { font-size:13pt; font-weight:900; margin-bottom:14px; }
+    .close h2  { font-size:13pt; font-weight:900; margin-bottom:12px; }
     .close-row { font-size:10pt; line-height:2; color:#333; }
-    .sig-line  { border-bottom:2px solid #aaa; width:200px; margin-top:50px; margin-bottom:8px; }
+    .sig-line  { border-bottom:2px solid #aaa; width:200px; margin-top:40px; margin-bottom:8px; }
     @media print { body { -webkit-print-color-adjust:exact; print-color-adjust:exact; } }
   `;
 
-  const iconSm = `<svg viewBox="0 0 22 22" width="18" height="18" fill="white"><rect x="2" y="2" width="18" height="3"/><rect x="2" y="8.5" width="11" height="3"/><rect x="2" y="15" width="18" height="3"/><polygon points="14,8.5 18,8.5 15,12.5 19,12.5 12,20 13,13.5 9,13.5"/></svg>`;
-  const iconLg = `<svg viewBox="0 0 22 22" width="20" height="20" fill="white"><rect x="2" y="2" width="18" height="3"/><rect x="2" y="8.5" width="11" height="3"/><rect x="2" y="15" width="18" height="3"/><polygon points="14,8.5 18,8.5 15,12.5 19,12.5 12,20 13,13.5 9,13.5"/></svg>`;
-  const logoSm   = `<div class="logo-sm"><div class="logo-box">${iconSm}</div><div><div class="logo-name">Electrizar</div><div class="logo-sub">Constructora Electromecánica</div></div></div>`;
-  const logoFull = `<div class="logo-full"><div class="logo-full-box">${iconLg}</div><div><div class="logo-full-name">Electrizar</div><div class="logo-full-sub">Constructora Electromecánica</div></div></div>`;
-  const hdr = `<div class="hdr">${logoSm}<div class="hdr-info"><b>Empresa:</b> ${CO.nombre} &nbsp; <b>Dirección:</b> ${CO.dir}<br/><b>Teléfono:</b> ${CO.tel} &nbsp; <b>N.º de elementos:</b> ${nEl}<br/><b>Correo electrónico:</b> ${CO.correo}</div></div>`;
-  const ftr = (p, t) => `<div class="ftr">${logoFull}<div class="ftr-pg">página ${p} de ${t}</div></div>`;
+  const hdr = `<div class="hdr">
+    <img class="hdr-logo" src="${LOGO_ICON}" alt="Electrizar"/>
+    <div class="hdr-info">
+      <b>Empresa:</b> ${CO.nombre} &nbsp; <b>Dirección:</b> ${CO.dir}<br/>
+      <b>Teléfono:</b> ${CO.tel} &nbsp; <b>N.º de elementos:</b> ${nEl}<br/>
+      <b>Correo electrónico:</b> ${CO.correo}
+    </div>
+  </div>`;
+
+  const ftr = (p, t) => `<div class="ftr">
+    <img class="ftr-logo" src="${LOGO_FULL}" alt="Electrizar Electromecánica"/>
+    <div class="ftr-pg">página ${p} de ${t}</div>
+  </div>`;
 
   const portada = `<div class="pg cover">
-    <div class="cover-hdr">${logoSm}</div>
+    <div class="cover-hdr"><img class="hdr-logo" src="${LOGO_ICON}" alt="Electrizar"/></div>
     <div class="cover-title">${informe.codigo} — Informe ${tipoLabel} Eléctrica</div>
     <div class="cover-sub">Informe fotográfico con resumen de hallazgos y acciones requeridas para la ${tipoLabel} Eléctrica.</div>
     <div class="cover-table">
@@ -188,7 +189,8 @@ const generatePDFElectrico = (informe) => {
     </div>`;
   }).join("");
 
-  const plazoH = informe.tipo !== "inspeccion" && informe.plazo && informe.plazo !== "N/A" ? `<div><b>Plazo para ejecución de mejoras:</b> ${informe.plazo}.</div>` : "";
+  const plazoH = informe.tipo !== "inspeccion" && informe.plazo && informe.plazo !== "N/A"
+    ? `<div><b>Plazo para ejecución de mejoras:</b> ${informe.plazo}.</div>` : "";
   const notasH = informe.notas ? `<div><b>Notas adicionales:</b><br/>${informe.notas}</div>` : "";
   const cierre = `<div class="pg">${hdr}<div class="close">
     <h2>Final de Reporte</h2>
@@ -215,30 +217,24 @@ const generatePDFAC = (informe) => {
   const totalPags = nEq + 2;
 
   const css = `
-    @page { size: letter portrait; margin: 0; }
+    @page { size: letter landscape; margin: 0; }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: Arial, Helvetica, sans-serif; font-size: 9pt; color: #222; background: white; }
-    .pg { width: 216mm; padding: 16mm 18mm 12mm 18mm; page-break-after: always; }
+    .pg { width: 279mm; padding: 12mm 16mm 10mm 16mm; page-break-after: always; }
     .pg:last-child { page-break-after: avoid; }
-    .hdr { display:flex; justify-content:space-between; align-items:flex-start; padding-bottom:8px; border-bottom:2px solid #e5e7eb; margin-bottom:10px; }
-    .logo-sm { display:flex; align-items:center; gap:7px; }
-    .logo-box { width:28px; height:28px; background:#F5A800; border-radius:4px; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
-    .logo-name { font-weight:900; font-size:10.5pt; line-height:1.2; color:#111; }
-    .logo-sub  { font-size:7pt; color:#F5A800; font-weight:600; }
+    .hdr { display:flex; justify-content:space-between; align-items:center; padding-bottom:7px; border-bottom:2px solid #e5e7eb; margin-bottom:10px; }
+    .hdr-logo { height:32px; width:auto; display:block; }
     .hdr-info  { text-align:right; font-size:7.5pt; color:#555; line-height:1.7; }
-    .ftr { display:flex; justify-content:space-between; align-items:flex-end; margin-top:18px; padding-top:8px; border-top:2px solid #e5e7eb; }
-    .logo-full { display:flex; align-items:center; gap:8px; }
-    .logo-full-box { width:34px; height:34px; background:#F5A800; border-radius:4px; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
-    .logo-full-name { font-weight:900; font-size:13pt; line-height:1.1; color:#111; }
-    .logo-full-sub  { font-size:7.5pt; color:#F5A800; font-weight:600; }
+    .ftr { display:flex; justify-content:space-between; align-items:center; margin-top:16px; padding-top:7px; border-top:2px solid #e5e7eb; }
+    .ftr-logo { height:36px; width:auto; display:block; }
     .ftr-pg { font-size:8pt; color:#9ca3af; }
     /* portada */
-    .cover { padding:20mm 18mm 12mm 18mm; }
-    .cover-hdr { margin-bottom:50px; }
-    .cover-title { font-size:26pt; font-weight:900; color:#111; line-height:1.25; margin-bottom:14px; }
-    .cover-sub   { font-size:10pt; color:#555; line-height:1.6; margin-bottom:32px; }
-    .cover-table { border-top:3px solid #111; border-bottom:3px solid #111; padding:16px 0; }
-    .cover-row   { display:flex; margin-bottom:6px; font-size:10pt; }
+    .cover { padding:14mm 16mm 10mm 16mm; }
+    .cover-hdr { margin-bottom:30px; }
+    .cover-title { font-size:24pt; font-weight:900; color:#111; line-height:1.25; margin-bottom:10px; }
+    .cover-sub   { font-size:10pt; color:#555; line-height:1.6; margin-bottom:24px; }
+    .cover-table { border-top:3px solid #111; border-bottom:3px solid #111; padding:12px 0; }
+    .cover-row   { display:flex; margin-bottom:5px; font-size:10pt; }
     .cover-lbl   { font-weight:700; width:180px; flex-shrink:0; }
     .cover-val   { color:#333; }
     /* resumen */
@@ -246,34 +242,41 @@ const generatePDFAC = (informe) => {
     .res-table th { background:#F5A800; color:white; font-weight:700; padding:7px 10px; text-align:left; }
     .res-table td { padding:6px 10px; border-bottom:1px solid #f3f4f6; vertical-align:middle; }
     .res-table tr:nth-child(even) td { background:#fafafa; }
-    .sum-row { display:flex; gap:16px; margin-top:16px; }
+    .sum-row { display:flex; gap:16px; margin-top:14px; }
     .sum-box { flex:1; border:2px solid #e5e7eb; border-radius:8px; padding:10px; text-align:center; }
     .sum-num { font-size:20pt; font-weight:900; }
     .sum-lbl { font-size:7.5pt; color:#666; margin-top:2px; }
     .badge-ap { background:#f0fdf4; color:#16a34a; border:1px solid #bbf7d0; padding:2px 10px; border-radius:20px; font-size:7.5pt; font-weight:700; display:inline-block; }
     .badge-no { background:#fef2f2; color:#dc2626; border:1px solid #fecaca; padding:2px 10px; border-radius:20px; font-size:7.5pt; font-weight:700; display:inline-block; }
     /* equipo */
-    .eq-title-row { display:flex; align-items:center; gap:10px; margin-bottom:12px; flex-wrap:wrap; }
+    .eq-title-row { display:flex; align-items:center; gap:10px; margin-bottom:10px; flex-wrap:wrap; }
     .eq-title { font-size:12pt; font-weight:900; color:#111; }
-    .foto-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:10px; }
+    .foto-grid { display:grid; grid-template-columns:1fr 1fr 1fr 1fr; gap:10px; margin-bottom:10px; }
     .foto-cell { display:flex; flex-direction:column; gap:4px; }
-    .foto-lbl  { font-size:7.5pt; font-weight:700; color:#555; text-transform:uppercase; letter-spacing:0.04em; }
-    .foto-img  { width:100%; height:158px; object-fit:cover; border-radius:7px; border:1px solid #e5e7eb; display:block; }
-    .foto-empty { width:100%; height:158px; background:#f3f4f6; border-radius:7px; display:flex; align-items:center; justify-content:center; font-size:22pt; color:#d1d5db; }
-    .sec-lbl   { font-weight:700; font-size:8.5pt; color:#374151; margin-bottom:3px; margin-top:8px; }
+    .foto-lbl  { font-size:7pt; font-weight:700; color:#555; text-transform:uppercase; letter-spacing:0.03em; }
+    .foto-img  { width:100%; height:148px; object-fit:cover; border-radius:6px; border:1px solid #e5e7eb; display:block; }
+    .foto-empty { width:100%; height:148px; background:#f3f4f6; border-radius:6px; display:flex; align-items:center; justify-content:center; font-size:20pt; color:#d1d5db; }
+    .sec-lbl   { font-weight:700; font-size:8.5pt; color:#374151; margin-bottom:3px; margin-top:7px; }
     .item-line { font-size:8.5pt; color:#444; line-height:1.6; }
     @media print { body { -webkit-print-color-adjust:exact; print-color-adjust:exact; } }
   `;
 
-  const iconSm = `<svg viewBox="0 0 22 22" width="18" height="18" fill="white"><rect x="2" y="2" width="18" height="3"/><rect x="2" y="8.5" width="11" height="3"/><rect x="2" y="15" width="18" height="3"/><polygon points="14,8.5 18,8.5 15,12.5 19,12.5 12,20 13,13.5 9,13.5"/></svg>`;
-  const iconLg = `<svg viewBox="0 0 22 22" width="20" height="20" fill="white"><rect x="2" y="2" width="18" height="3"/><rect x="2" y="8.5" width="11" height="3"/><rect x="2" y="15" width="18" height="3"/><polygon points="14,8.5 18,8.5 15,12.5 19,12.5 12,20 13,13.5 9,13.5"/></svg>`;
-  const logoSm   = `<div class="logo-sm"><div class="logo-box">${iconSm}</div><div><div class="logo-name">Electrizar</div><div class="logo-sub">Constructora Electromecánica</div></div></div>`;
-  const logoFull = `<div class="logo-full"><div class="logo-full-box">${iconLg}</div><div><div class="logo-full-name">Electrizar</div><div class="logo-full-sub">Constructora Electromecánica</div></div></div>`;
-  const hdr = `<div class="hdr">${logoSm}<div class="hdr-info"><b>Empresa:</b> ${CO.nombre} &nbsp; <b>Dirección:</b> ${CO.dir}<br/><b>Teléfono:</b> ${CO.tel} &nbsp; <b>N.º de equipos:</b> ${nEq}<br/><b>Correo electrónico:</b> ${CO.correo}</div></div>`;
-  const ftr = (p, t) => `<div class="ftr">${logoFull}<div class="ftr-pg">página ${p} de ${t}</div></div>`;
+  const hdr = `<div class="hdr">
+    <img class="hdr-logo" src="${LOGO_ICON}" alt="Electrizar"/>
+    <div class="hdr-info">
+      <b>Empresa:</b> ${CO.nombre} &nbsp; <b>Dirección:</b> ${CO.dir}<br/>
+      <b>Teléfono:</b> ${CO.tel} &nbsp; <b>N.º de equipos:</b> ${nEq}<br/>
+      <b>Correo electrónico:</b> ${CO.correo}
+    </div>
+  </div>`;
+
+  const ftr = (p, t) => `<div class="ftr">
+    <img class="ftr-logo" src="${LOGO_FULL}" alt="Electrizar Electromecánica"/>
+    <div class="ftr-pg">página ${p} de ${t}</div>
+  </div>`;
 
   const portada = `<div class="pg cover">
-    <div class="cover-hdr">${logoSm}</div>
+    <div class="cover-hdr"><img class="hdr-logo" src="${LOGO_ICON}" alt="Electrizar"/></div>
     <div class="cover-title">Informe de Mantenimiento de Aires Acondicionados</div>
     <div class="cover-sub">Informe del mantenimiento preventivo para los equipos de aire acondicionado en ${informe.propietario}.</div>
     <div class="cover-table">
@@ -287,18 +290,18 @@ const generatePDFAC = (informe) => {
     ${ftr(1, totalPags)}
   </div>`;
 
-  const ap = equipos.filter(e => e.resultado === "Aprobado").length;
+  const ap   = equipos.filter(e => e.resultado === "Aprobado").length;
   const noAp = equipos.filter(e => e.resultado === "No Aprobado").length;
   const filas = equipos.map((eq, i) => `<tr>
-    <td style="font-weight:700">(${i + 1})</td>
+    <td style="font-weight:700">(${i+1})</td>
     <td>${eq.nombre}</td>
     <td>${eq.ubicacion || "—"}</td>
     <td><span class="${eq.resultado === "Aprobado" ? "badge-ap" : "badge-no"}">${eq.resultado || "Pendiente"}</span></td>
   </tr>`).join("");
 
   const resumen = `<div class="pg">${hdr}
-    <div style="font-size:13pt;font-weight:900;margin-bottom:12px;">Resumen General</div>
-    <div style="font-size:9pt;color:#555;margin-bottom:10px;">Mantenimiento preventivo realizado el ${fmtFecha(informe.fecha)} por ${informe.tecnico || "técnico de campo"}. Se revisaron <b>${nEq} equipo${nEq !== 1 ? "s" : ""}</b> de aire acondicionado.</div>
+    <div style="font-size:13pt;font-weight:900;margin-bottom:10px;">Resumen General</div>
+    <div style="font-size:9pt;color:#555;margin-bottom:8px;">Mantenimiento preventivo realizado el ${fmtFecha(informe.fecha)} por ${informe.tecnico || "técnico de campo"}. Se revisaron <b>${nEq} equipo${nEq !== 1 ? "s" : ""}</b> de aire acondicionado.</div>
     <table class="res-table"><thead><tr><th>#</th><th>Equipo</th><th>Ubicación</th><th>Resultado</th></tr></thead><tbody>${filas}</tbody></table>
     <div class="sum-row">
       <div class="sum-box"><div class="sum-num" style="color:#111">${nEq}</div><div class="sum-lbl">Total equipos</div></div>
@@ -316,7 +319,7 @@ const generatePDFAC = (informe) => {
     const acHTML = (eq.acciones || []).map(a => `<div class="item-line">- ${a}</div>`).join("") || `<div class="item-line" style="color:#aaa">Sin acciones reportadas.</div>`;
     return `<div class="pg">${hdr}
       <div class="eq-title-row">
-        <div class="eq-title">(${i + 1}) ${eq.nombre}</div>
+        <div class="eq-title">(${i+1}) ${eq.nombre}</div>
         <span class="${eq.resultado === "Aprobado" ? "badge-ap" : "badge-no"}">${eq.resultado || "Pendiente"}</span>
         ${eq.ubicacion ? `<span style="font-size:8pt;color:#888">📍 ${eq.ubicacion}</span>` : ""}
       </div>
@@ -338,6 +341,7 @@ const generatePDFAC = (informe) => {
   w.document.write(html); w.document.close();
   w.onload = () => { w.focus(); setTimeout(() => w.print(), 500); };
 };
+
 
 /* ─────────────────────────────────────────
    ATOMS / UI
