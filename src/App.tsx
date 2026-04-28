@@ -27,13 +27,11 @@ const fbApp = initializeApp(firebaseConfig);
 const db = initializeFirestore(fbApp, {
   localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
 });
-// Fire-and-forget: escribe en caché local inmediatamente (offline OK)
-// La sincronización con el servidor ocurre sola cuando hay red
 const saveInformeFS = (inf: any): void => {
   setDoc(doc(db,"informes",String(inf.id)),{...inf,updatedAt:serverTimestamp()})
-    .catch((err) => console.warn("[Firestore] sync pendiente:", err));
+    .catch((e)=>console.warn("[FS] sync pendiente:",e));
 };
-const deleteInformeFS = async (id: any)  => { await deleteDoc(doc(db,"informes",String(id))); };
+const deleteInformeFS = async (id: any) => { await deleteDoc(doc(db,"informes",String(id))); };
 
 const USUARIOS = [
   { user:"amontiel",   pass:"cubillo26", nombre:"Ing. Alonso Montiel Cubillo", matricula:"IE-24011 / CAPDEE-165", rol:"ingeniero" },
@@ -58,6 +56,22 @@ const AC_FOTOS = [
   { key:"presiones",    label:"Nivel de presión de refrigerante", icon:"🔵", hint:"Foto manómetro con presiones del sistema" },
 ];
 const HOY   = new Date().toISOString().split("T")[0];
+const NOTA_AGOSTO_2012 = `La instalación eléctrica objeto de la presente verificación data de una época anterior a agosto de 2012, fecha en que entró en vigencia el Reglamento de Oficialización del Código Eléctrico de Costa Rica para la Seguridad de la Vida y de la Propiedad (RTCR 458:2011), Decreto Ejecutivo N.° 36979-MEIC. Por lo tanto, los sistemas existentes no estaban sujetos a dicha normativa al momento de su construcción, y su evaluación se realiza únicamente con base en las condiciones de seguridad observables al momento de la inspección, conforme al Anexo B del citado reglamento.`;
+
+const calcCumplimiento = (elementos: any[]) => {
+  if(!elementos?.length) return 100;
+  const alta=elementos.filter(e=>e.prioridad==="alta").length;
+  return Math.round((1-alta/elementos.length)*100);
+};
+
+const suggestCodigo = (informes: any[]) => {
+  const yr=new Date().getFullYear().toString().slice(-2);
+  const prefix=`INF-${yr}-`;
+  const nums=informes.map(i=>i.codigo?.startsWith(prefix)?parseInt(i.codigo.replace(prefix,""),10):0).filter(n=>n>0);
+  const next=nums.length?Math.max(...nums)+1:1;
+  return `${prefix}${String(next).padStart(3,"0")}`;
+};
+
 const MESES = ["enero","febrero","marzo","abril","mayo","junio","julio","agosto","septiembre","octubre","noviembre","diciembre"];
 
 const lsto = {
@@ -95,6 +109,7 @@ const callAI = async (b64: string, titulo: string) => {
   const d=await r.json();
   if(d.error) throw new Error(d.error);
   if(!Array.isArray(d.hallazgos)) throw new Error("Respuesta inesperada de la IA");
+  if(!Array.isArray(d.notas)) d.notas=[];
   return d;
 };
 
@@ -111,19 +126,41 @@ const openPDF=(html:string)=>{const w=window.open("","_blank");if(!w){alert("Per
 const generatePDFElectrico=(informe:any)=>{
   const nEl=informe.elementos?.length||0,totalPags=nEl+3,tipoLabel=informe.tipo==="inspeccion"?"Inspección":"Verificación",hdr=pdfHdr(nEl,"elementos");
   const css=PDF_CSS_BASE+`.lim h2{font-size:12pt;font-weight:900;margin-bottom:12px;}.lim p{font-size:8.5pt;line-height:1.65;color:#444;margin-bottom:9px;}.el-row{display:flex;gap:16px;}.el-photo{width:210px;height:210px;object-fit:cover;border-radius:7px;border:1px solid #e5e7eb;flex-shrink:0;display:block;}.el-empty{width:210px;height:210px;background:#f3f4f6;border-radius:7px;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:28pt;color:#d1d5db;}.el-num{font-size:7pt;color:#bbb;text-align:right;margin-top:3px;}.el-text{flex:1;min-width:0;}.el-title-row{display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap;}.el-title{font-weight:900;font-size:10.5pt;color:#111;}.close h2{font-size:13pt;font-weight:900;margin-bottom:12px;}.close-row{font-size:10pt;line-height:2;color:#333;}.sig-line{border-bottom:2px solid #aaa;width:200px;margin-top:40px;margin-bottom:8px;}`;
-  const portada=`<div class="pg cover"><img class="cover-logo" src="${LOGO_ICON_URI}" alt="Electrizar"/><div class="cover-title">${informe.codigo} — Informe ${tipoLabel} Eléctrica</div><div class="cover-sub">Informe fotográfico con resumen de hallazgos y acciones requeridas para la ${tipoLabel} Eléctrica.</div><div class="cover-table"><div class="cover-row"><div class="cover-lbl">Propietario:</div><div class="cover-val">${informe.propietario}</div></div><div class="cover-row"><div class="cover-lbl">Dirección:</div><div class="cover-val">${informe.direccion||"—"}</div></div><div class="cover-row"><div class="cover-lbl">Fecha:</div><div class="cover-val">${fmtFecha(informe.fecha)}</div></div><div class="cover-row"><div class="cover-lbl">Versión:</div><div class="cover-val">0.1V</div></div>${informe.ingeniero?`<div class="cover-row"><div class="cover-lbl">Responsable:</div><div class="cover-val">${informe.ingeniero}${informe.matricula?". "+informe.matricula+".":""}</div></div>`:""}</div>${pdfFtr(1,totalPags)}</div>`;
+  const portada=`<div class="pg cover"><img class="cover-logo" src="${LOGO_ICON_URI}" alt="Electrizar"/><div class="cover-title">${informe.codigo} — Informe ${tipoLabel} Eléctrica</div><div class="cover-sub">Informe fotográfico con resumen de hallazgos y acciones requeridas para la ${tipoLabel} Eléctrica.</div><div class="cover-table"><div class="cover-row"><div class="cover-lbl">Propietario:</div><div class="cover-val">${informe.propietario}</div></div><div class="cover-row"><div class="cover-lbl">Dirección:</div><div class="cover-val">${informe.direccion||"—"}</div></div><div class="cover-row"><div class="cover-lbl">Fecha:</div><div class="cover-val">${fmtFecha(informe.fecha)}</div></div><div class="cover-row"><div class="cover-lbl">Versión:</div><div class="cover-val">0.1V</div></div>${informe.ingeniero?`<div class="cover-row"><div class="cover-lbl">Responsable:</div><div class="cover-val">${informe.ingeniero}${informe.matricula?". "+informe.matricula+".":""}</div></div>`:""}<div class="cover-row"><div class="cover-lbl">Cumplimiento:</div><div class="cover-val" style="font-weight:700;color:${calcCumplimiento(informe.elementos||[])>=80?"#16a34a":calcCumplimiento(informe.elementos||[])>=50?"#d97706":"#dc2626"}">${calcCumplimiento(informe.elementos||[])}%</div></div></div>${pdfFtr(1,totalPags)}</div>`;
   const limitaciones=`<div class="pg">${hdr}<div class="lim"><h2>Análisis y Limitaciones del presente informe fotográfico:</h2><p>El presente informe documenta las no conformidades identificadas durante la verificación visual de las instalaciones eléctricas, conforme al artículo 5.2 del RTCR 458:2011, Decreto Ejecutivo N.° 36979-MEIC. La evaluación se realiza con base en el Anexo B para condiciones de "Peligro Inminente" o "Alto Riesgo", complementadas con las referencias del Código Eléctrico NFPA 70 (NEC), edición 2020.</p><p>Los hallazgos se sustentan en la evidencia visible recopilada al momento de la inspección y deben interpretarse como referencia técnica, no como delimitación absoluta del alcance correctivo. Toda condición adicional que represente incumplimiento deberá ser corregida igualmente.</p><p>No se contó con planos eléctricos actualizados inscritos ante el CFIA ni documentación técnica suficiente para validar integralmente el sistema eléctrico existente.</p></div>${pdfFtr(2,totalPags)}</div>`;
   const elPags=(informe.elementos||[]).map((el:any,i:number)=>{
     const bc=el.prioridad==="alta"?"b-alta":el.prioridad==="baja"?"b-baja":"b-normal",bl=el.prioridad==="alta"?"Alta":el.prioridad==="baja"?"Baja":"Normal";
     const img=el.url?`<img class="el-photo" src="${el.url}" alt="${el.titulo}"/>`:`<div class="el-empty">📷</div>`;
     const hh=(el.hallazgos||[]).map((h:string)=>`<div class="item-line">- ${h}</div>`).join("")||`<div class="item-line" style="color:#aaa">Sin hallazgos.</div>`;
     const aa=(el.acciones||[]).map((a:string)=>`<div class="item-line">- ${a}</div>`).join("")||`<div class="item-line" style="color:#aaa">Sin acciones.</div>`;
-    return `<div class="pg">${hdr}<div class="el-row"><div><div style="flex-shrink:0">${img}</div><div class="el-num">(${el.num})</div></div><div class="el-text"><div class="el-title-row"><span class="el-title">Título: ${el.titulo}</span><span class="badge ${bc}">${bl}</span></div><div class="sec-lbl">Hallazgos:</div>${hh}<div class="sec-lbl">Acciones requeridas:</div>${aa}</div></div>${pdfFtr(i+3,totalPags)}</div>`;
+    const nn=(el.notas||[]).map((n:string)=>`<div class="item-line">📝 ${n}</div>`).join("");
+    return `<div class="pg">${hdr}<div class="el-row"><div><div style="flex-shrink:0">${img}</div><div class="el-num">(${el.num})</div></div><div class="el-text"><div class="el-title-row"><span class="el-title">Título: ${el.titulo}</span><span class="badge ${bc}">${bl}</span></div><div class="sec-lbl">Hallazgos:</div>${hh}<div class="sec-lbl">Acciones requeridas:</div>${aa}${nn?`<div class="sec-lbl">Notas técnicas:</div>${nn}`:""}</div></div>${pdfFtr(i+3,totalPags)}</div>`;
   }).join("");
   const plazoH=informe.tipo!=="inspeccion"&&informe.plazo&&informe.plazo!=="N/A"?`<div><b>Plazo para ejecución de mejoras:</b> ${informe.plazo}.</div>`:"";
   const notasH=informe.notas?`<div><b>Notas adicionales:</b><br/>${informe.notas}</div>`:"";
-  const cierre=`<div class="pg">${hdr}<div class="close"><h2>Final de Reporte</h2><div class="close-row"><div><b>Resultado de ${tipoLabel.toLowerCase()}:</b> ${informe.resultado}.</div>${plazoH}${notasH}</div>${informe.ingeniero?`<div class="sig-line"></div><div style="font-size:10pt;font-weight:700">${informe.ingeniero}</div><div style="font-size:9pt;color:#555">${informe.matricula||""}</div>`:""}</div>${pdfFtr(totalPags,totalPags)}</div>`;
+  const cierre=`<div class="pg">${hdr}<div class="close"><h2>Final de Reporte</h2><div class="close-row"><div><b>Resultado de ${tipoLabel.toLowerCase()}:</b> ${informe.resultado}.</div>${plazoH}${notasH}</div>${informe.firmaUrl?`<div style="margin-top:20px"><img src="${informe.firmaUrl}" style="max-height:80px;max-width:240px;object-fit:contain;display:block"/></div>`:""}${informe.ingeniero?`<div class="sig-line"></div><div style="font-size:10pt;font-weight:700">${informe.ingeniero}</div><div style="font-size:9pt;color:#555">${informe.matricula||""}</div>`:""}</div>${pdfFtr(totalPags,totalPags)}</div>`;
   openPDF(`<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"/><title>${informe.codigo}</title><style>${css}</style></head><body>${portada}${limitaciones}${elPags}${cierre}</body></html>`);
+};
+
+
+/* ══ PDF RESUMEN EJECUTIVO ══ */
+const generateResumenEjecutivo=(informe:any)=>{
+  const nEl=informe.elementos?.length||0,tipoLabel=informe.tipo==="inspeccion"?"Inspección":"Verificación";
+  const cumpl=calcCumplimiento(informe.elementos||[]);
+  const alta=(informe.elementos||[]).filter((e:any)=>e.prioridad==="alta").length;
+  const normal=(informe.elementos||[]).filter((e:any)=>e.prioridad==="normal").length;
+  const baja=(informe.elementos||[]).filter((e:any)=>e.prioridad==="baja").length;
+  const css=PDF_CSS_BASE+`.tbl{width:100%;border-collapse:collapse;margin-top:12px;font-size:8.5pt;}.tbl th{background:#F5A800;color:white;font-weight:700;padding:7px 10px;text-align:left;}.tbl td{padding:6px 10px;border-bottom:1px solid #f3f4f6;}.tbl tr:nth-child(even) td{background:#fafafa;}.stat-row{display:flex;gap:12px;margin-top:14px;}.stat-box{flex:1;border:2px solid #e5e7eb;border-radius:8px;padding:10px;text-align:center;}.stat-num{font-size:18pt;font-weight:900;}.stat-lbl{font-size:7pt;color:#666;margin-top:2px;}.cumpl-bar{height:12px;background:#e5e7eb;border-radius:6px;overflow:hidden;margin-top:6px;}.cumpl-fill{height:100%;border-radius:6px;}.result-box{border-radius:12px;padding:14px 18px;margin-top:14px;}.result-lbl{font-size:8.5pt;font-weight:700;color:#555;margin-bottom:4px;}.result-val{font-size:16pt;font-weight:900;}`;
+  const rColor=informe.resultado==="Aprobada"?"#16a34a":informe.resultado==="Condicionada"?"#d97706":"#dc2626";
+  const rBg=informe.resultado==="Aprobada"?"#f0fdf4":informe.resultado==="Condicionada"?"#fffbeb":"#fef2f2";
+  const filas=(informe.elementos||[]).map((el:any,i:number)=>{
+    const bc=el.prioridad==="alta"?"color:#dc2626":el.prioridad==="baja"?"color:#16a34a":"color:#d97706";
+    return`<tr><td style="font-weight:700">(${i+1})</td><td>${el.titulo}</td><td style="${bc};font-weight:700">${el.prioridad==="alta"?"Alta":el.prioridad==="baja"?"Baja":"Normal"}</td><td>${(el.hallazgos||[]).length}</td></tr>`;
+  }).join("");
+  const hdr=pdfHdr(nEl,"elementos");
+  const portada=`<div class="pg cover"><img class="cover-logo" src="${LOGO_ICON_URI}" alt="Electrizar"/><div class="cover-title">Resumen Ejecutivo — ${tipoLabel} Eléctrica</div><div class="cover-sub">${informe.codigo} · ${informe.propietario}</div><div class="cover-table"><div class="cover-row"><div class="cover-lbl">Cliente:</div><div class="cover-val">${informe.propietario}</div></div><div class="cover-row"><div class="cover-lbl">Dirección:</div><div class="cover-val">${informe.direccion||"—"}</div></div><div class="cover-row"><div class="cover-lbl">Fecha:</div><div class="cover-val">${fmtFecha(informe.fecha)}</div></div>${informe.ingeniero?`<div class="cover-row"><div class="cover-lbl">Responsable:</div><div class="cover-val">${informe.ingeniero}${informe.matricula?". "+informe.matricula:""}.</div></div>`:""}</div><div class="result-box" style="background:${rBg};margin-top:20px;"><div class="result-lbl">Resultado de ${tipoLabel.toLowerCase()}</div><div class="result-val" style="color:${rColor}">${informe.resultado||"En curso"}</div>${informe.plazo&&informe.plazo!=="N/A"?`<div style="font-size:8pt;color:#555;margin-top:4px">Plazo: ${informe.plazo}</div>`:""}</div><div class="stat-row"><div class="stat-box"><div class="stat-num">${nEl}</div><div class="stat-lbl">Total elementos</div></div><div class="stat-box"><div class="stat-num" style="color:#dc2626">${alta}</div><div class="stat-lbl">Alta prioridad</div></div><div class="stat-box"><div class="stat-num" style="color:#d97706">${normal}</div><div class="stat-lbl">Normal</div></div><div class="stat-box"><div class="stat-num" style="color:#16a34a">${baja}</div><div class="stat-lbl">Baja</div></div><div class="stat-box"><div class="stat-num" style="color:${cumpl>=80?"#16a34a":cumpl>=50?"#d97706":"#dc2626"}">${cumpl}%</div><div class="stat-lbl">Cumplimiento</div></div></div>${pdfFtr(1,2)}</div>`;
+  const resumen=`<div class="pg">${hdr}<div style="font-size:12pt;font-weight:900;margin-bottom:10px;">Resumen de Elementos</div><table class="tbl"><thead><tr><th>#</th><th>Elemento</th><th>Prioridad</th><th>Hallazgos</th></tr></thead><tbody>${filas}</tbody></table>${informe.notas?`<div class="sec-lbl" style="margin-top:14px">Notas:</div><div class="item-line">${informe.notas}</div>`:""}<div class="stat-row" style="margin-top:14px"><div class="stat-box"><div style="font-size:10pt;font-weight:700;margin-bottom:4px">Cumplimiento estimado</div><div class="cumpl-bar"><div class="cumpl-fill" style="width:${cumpl}%;background:${cumpl>=80?"#16a34a":cumpl>=50?"#d97706":"#dc2626"}"></div></div><div style="font-size:9pt;text-align:right;margin-top:4px;color:#555">${cumpl}%</div></div></div>${pdfFtr(2,2)}</div>`;
+  openPDF(`<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"/><title>Resumen ${informe.codigo}</title><style>${css}</style></head><body>${portada}${resumen}</body></html>`);
 };
 
 /* ══ PDF AC ══ */
@@ -227,7 +264,7 @@ const Pill=({children,active,color,onClick}:any)=>(<button onClick={onClick} cla
 const Btn=({children,onClick,sm,disabled,full,className=""}:any)=>{const base=`font-bold rounded-xl transition-all active:scale-95 flex items-center justify-center gap-1.5 ${sm?"px-3 py-2 text-sm":"px-5 py-3"} ${full?"w-full":""} ${className}`;return<button onClick={onClick} disabled={disabled} className={`${base} ${disabled?"opacity-50 cursor-not-allowed":"hover:opacity-90"}`} style={{background:disabled?"#9ca3af":Y,color:"white"}}>{children}</button>;};
 const Card=({title,children,accent}:any)=>(<div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">{title&&<div className="px-4 pt-4 pb-2 flex items-center gap-2">{accent&&<div className="w-1 h-4 rounded-full" style={{background:Y}}/>}<h3 className="font-bold text-gray-700 text-xs uppercase tracking-widest">{title}</h3></div>}<div className="px-4 pb-4 space-y-3">{children}</div></div>);
 const FI=({label,value,onChange,...rest}:any)=>(<div><label className="block text-xs font-semibold text-gray-400 mb-1 uppercase tracking-wider">{label}</label><input value={value} onChange={onChange} className="w-full border-2 border-gray-100 rounded-xl px-3 py-2.5 text-sm text-gray-800 bg-gray-50 focus:outline-none focus:border-amber-400 focus:bg-white transition-all" {...rest}/></div>);
-const ListEditor=({label,items,set,placeholder}:any)=>(<div><div className="flex items-center justify-between mb-2"><label className="text-xs font-bold text-gray-400 uppercase tracking-wider">{label}</label><button onClick={()=>set([...items,""])} className="text-xs font-bold px-2.5 py-1 rounded-lg hover:opacity-80" style={{color:Y,background:Y+"18"}}>+ Agregar</button></div><div className="space-y-2">{!items.length&&<div className="text-xs text-gray-400 text-center py-3 border-2 border-dashed border-gray-100 rounded-xl">Sin {label.toLowerCase()}</div>}{items.map((h:string,i:number)=>(<div key={i} className="flex gap-2 items-start"><textarea value={h} onChange={(e:any)=>{const c=[...items];c[i]=e.target.value;set(c);}} rows={2} placeholder={placeholder} className="flex-1 border-2 border-gray-100 rounded-xl px-3 py-2 text-sm bg-gray-50 resize-none focus:outline-none focus:border-amber-400 focus:bg-white transition-all"/><button onClick={()=>set(items.filter((_:any,j:number)=>j!==i))} className="mt-1.5 w-6 h-6 flex items-center justify-center rounded-full text-gray-300 hover:text-red-400 hover:bg-red-50 transition-all text-base font-bold">×</button></div>))}</div></div>);
+const ListEditor=({label,items,set,placeholder,tipo}:any)=>{const[showPl,setShowPl]=useState(false);return(<div><div className="flex items-center justify-between mb-2"><label className="text-xs font-bold text-gray-400 uppercase tracking-wider">{label}</label><div className="flex gap-1.5"><button onClick={()=>setShowPl(true)} className="text-xs font-bold px-2 py-1 rounded-lg hover:opacity-80" style={{color:"#6366f1",background:"#6366f110"}}>📌</button><button onClick={()=>set([...items,""])} className="text-xs font-bold px-2.5 py-1 rounded-lg hover:opacity-80" style={{color:Y,background:Y+"18"}}>+ Agregar</button></div></div>{showPl&&<PlantillasInline tipo={tipo||label} onSelect={(t:string)=>{set([...items,t]);setShowPl(false);}} onClose={()=>setShowPl(false)} current={items}/>}<div className="space-y-2">{!items.length&&<div className="text-xs text-gray-400 text-center py-3 border-2 border-dashed border-gray-100 rounded-xl">Sin {label.toLowerCase()}</div>}{items.map((h:string,i:number)=>(<div key={i} className="flex gap-2 items-start"><textarea value={h} onChange={(e:any)=>{const c=[...items];c[i]=e.target.value;set(c);}} rows={2} placeholder={placeholder} className="flex-1 border-2 border-gray-100 rounded-xl px-3 py-2 text-sm bg-gray-50 resize-none focus:outline-none focus:border-amber-400 focus:bg-white transition-all"/><button onClick={()=>set(items.filter((_:any,j:number)=>j!==i))} className="mt-1.5 w-6 h-6 flex items-center justify-center rounded-full text-gray-300 hover:text-red-400 hover:bg-red-50 transition-all text-base font-bold">×</button></div>))}</div></div>);};
 
 /* PhotoPicker — Galería / Cámara sin capture fijo */
 const PhotoPicker=({inputRef,onChange}:{inputRef:React.RefObject<HTMLInputElement>,onChange:(e:any)=>void})=>(
@@ -237,6 +274,36 @@ const PhotoPicker=({inputRef,onChange}:{inputRef:React.RefObject<HTMLInputElemen
     <input ref={inputRef} type="file" accept="image/*" className="hidden" onChange={onChange}/>
   </div>
 );
+
+
+/* ══ PLANTILLAS INLINE ══ */
+function PlantillasInline({tipo,onSelect,onClose,current}:any){
+  const key=`plantillas_${tipo}`;
+  const[items,setItems]=useState<string[]>(()=>lsto.get(key)||[]);
+  const[nueva,setNueva]=useState("");
+  const guardar=()=>{if(!nueva.trim())return;const updated=[...items,nueva.trim()];setItems(updated);lsto.set(key,updated);setNueva("");};
+  const borrar=(i:number)=>{const updated=items.filter((_:any,j:number)=>j!==i);setItems(updated);lsto.set(key,updated);};
+  return(<div className="mb-3 border-2 border-indigo-100 rounded-xl overflow-hidden">
+    <div className="flex items-center justify-between px-3 py-2 bg-indigo-50"><span className="text-xs font-bold text-indigo-700">📌 Plantillas — {tipo}</span><button onClick={onClose} className="text-indigo-400 hover:text-indigo-700 font-bold text-base">✕</button></div>
+    <div className="p-3 space-y-1.5 max-h-48 overflow-y-auto">
+      {!items.length&&<p className="text-xs text-gray-400 text-center py-2">Sin plantillas. Agrega una abajo.</p>}
+      {items.map((t:string,i:number)=>(<div key={i} className="flex gap-2 items-start"><button onClick={()=>onSelect(t)} className="flex-1 text-xs text-left text-gray-700 bg-white border border-gray-100 rounded-lg px-2 py-1.5 hover:border-indigo-300 hover:bg-indigo-50 transition-all">{t}</button><button onClick={()=>borrar(i)} className="text-gray-300 hover:text-red-400 text-base font-bold shrink-0">×</button></div>))}
+    </div>
+    <div className="flex gap-2 px-3 pb-3"><input value={nueva} onChange={(e:any)=>setNueva(e.target.value)} onKeyDown={(e:any)=>e.key==="Enter"&&guardar()} className="flex-1 text-xs border border-gray-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-indigo-400" placeholder="Nueva plantilla…"/><button onClick={guardar} className="px-3 py-1.5 rounded-lg text-xs font-bold text-white" style={{background:"#6366f1"}}>Guardar</button></div>
+  </div>);
+}
+
+/* ══ FIRMA CANVAS ══ */
+function FirmaCanvas({onConfirm,onClose}:any){
+  const canvasRef=useRef<HTMLCanvasElement>(null);const[drawing,setDraw]=useState(false);const[hasFirma,setHas]=useState(false);
+  const getPos=(e:any)=>{const c=canvasRef.current!;const r=c.getBoundingClientRect();const sx=c.width/r.width,sy=c.height/r.height;let cx,cy;if(e.touches?.length){cx=e.touches[0].clientX;cy=e.touches[0].clientY;}else{cx=e.clientX;cy=e.clientY;}return{x:(cx-r.left)*sx,y:(cy-r.top)*sy};};
+  const start=(e:any)=>{if(e.cancelable)e.preventDefault();const c=canvasRef.current!;const ctx=c.getContext("2d")!;const pos=getPos(e);ctx.beginPath();ctx.moveTo(pos.x,pos.y);setDraw(true);setHas(true);};
+  const move=(e:any)=>{if(!drawing)return;if(e.cancelable)e.preventDefault();const c=canvasRef.current!;const ctx=c.getContext("2d")!;const pos=getPos(e);ctx.lineWidth=2.5;ctx.lineCap="round";ctx.strokeStyle="#111827";ctx.lineTo(pos.x,pos.y);ctx.stroke();};
+  const end=()=>setDraw(false);
+  const clear=()=>{const c=canvasRef.current!;c.getContext("2d")!.clearRect(0,0,c.width,c.height);setHas(false);};
+  const confirm=()=>{if(!hasFirma){alert("Dibuja tu firma primero.");return;}const c=canvasRef.current!;onConfirm(c.toDataURL("image/png"));};
+  return(<div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4"><div className="bg-white rounded-3xl overflow-hidden w-full max-w-sm shadow-2xl"><div className="flex items-center justify-between px-4 py-3 border-b border-gray-100"><span className="font-bold text-gray-800 text-sm">✍️ Firma del Responsable</span><button onClick={onClose} className="text-gray-300 hover:text-gray-600 font-bold text-lg">✕</button></div><div className="p-4"><div className="border-2 border-gray-200 rounded-2xl overflow-hidden bg-gray-50"><canvas ref={canvasRef} width={380} height={180} className="w-full touch-none cursor-crosshair" style={{display:"block"}} onMouseDown={start} onMouseMove={move} onMouseUp={end} onMouseLeave={end} onTouchStart={start} onTouchMove={move} onTouchEnd={end}/></div><div className="flex items-center justify-center mt-2 mb-4"><div className="h-px bg-gray-300 flex-1"/><span className="text-[10px] text-gray-400 mx-3">Firma aquí</span><div className="h-px bg-gray-300 flex-1"/></div><div className="flex gap-3"><button onClick={clear} className="flex-1 py-2.5 border-2 border-gray-200 rounded-xl text-sm font-bold text-gray-500 hover:bg-gray-50">Limpiar</button><button onClick={confirm} className="flex-1 py-2.5 rounded-xl text-sm font-bold text-white hover:opacity-90" style={{background:DARK}}>Confirmar ✓</button></div></div></div></div>);
+}
 
 /* ══ DELETE MODAL ══ */
 function DeleteModal({informe,onConfirm,onClose}:any){const[loading,setLoad]=useState(false);const handle=async()=>{setLoad(true);await deleteInformeFS(informe.id);onConfirm();};return(<div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4"><div className="bg-white rounded-3xl p-6 w-full max-w-sm shadow-2xl"><div className="w-14 h-14 rounded-2xl bg-red-100 flex items-center justify-center text-2xl mx-auto mb-4">🗑️</div><h3 className="font-extrabold text-gray-900 text-lg text-center mb-1">¿Eliminar informe?</h3><p className="text-sm text-gray-500 text-center mb-2"><span className="font-mono font-bold text-gray-700">{informe.codigo}</span></p><p className="text-xs text-gray-400 text-center mb-6">{informe.propietario} · {informe.fecha}<br/><span className="text-red-400 font-semibold">Esta acción no se puede deshacer.</span></p><div className="flex gap-3"><button onClick={onClose} className="flex-1 py-3 rounded-xl font-bold text-sm border-2 border-gray-200 text-gray-600 hover:bg-gray-50">Cancelar</button><button onClick={handle} disabled={loading} className="flex-1 py-3 rounded-xl font-bold text-sm text-white disabled:opacity-60" style={{background:"#dc2626"}}>{loading?"Eliminando…":"Sí, eliminar"}</button></div></div></div>);}
@@ -295,6 +362,9 @@ function AnnotationEditor({imageUrl,onConfirm,onClose}:any){
 /* ══ FINALIZAR MODAL ══ */
 function FinalizarModal({informe,onConfirm,onClose}:any){
   const tipo=informe.tipo||"verificacion",ress=tipo==="inspeccion"?RES_INSP:RES_VER;
+  const cumpl=calcCumplimiento(informe.elementos||[]);
+  const[firmaUrl,setFirmaUrl]=useState<string|null>(informe.firmaUrl||null);
+  const[showFirma,setShowFirma]=useState(false);
   const alta=(informe.elementos||[]).filter((e:any)=>e.prioridad==="alta").length,normal=(informe.elementos||[]).filter((e:any)=>e.prioridad==="normal").length,baja=(informe.elementos||[]).filter((e:any)=>e.prioridad==="baja").length,total=informe.elementos?.length||0;
   const suggested=tipo==="inspeccion"?(alta>0?"No Aprobada":"Aprobada"):(alta>0?"Rechazada":normal>0?"Condicionada":"Aprobada");
   const[resultado,setRes]=useState(informe.resultado||suggested);const[plazo,setPlazo]=useState(informe.plazo||"12 meses");const[notas,setNotas]=useState(informe.notas||"");const[saving,setSaving]=useState(false);
@@ -308,22 +378,25 @@ function FinalizarModal({informe,onConfirm,onClose}:any){
       <div><label className="block text-xs font-bold text-gray-400 mb-3 uppercase tracking-wider">Resultado *</label><div className="space-y-2.5">{ress.map((r:string)=>{const c=RC[r]||RC["Aprobada"];const active=resultado===r;return(<button key={r} onClick={()=>setRes(r)} className="w-full flex items-center gap-3 px-4 py-3.5 rounded-2xl border-2 text-left transition-all" style={{borderColor:active?c.color:"#e5e7eb",background:active?c.bg:"white"}}><div className="w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0" style={{borderColor:active?c.color:"#d1d5db",background:active?c.color:"white"}}>{active&&<div className="w-2 h-2 rounded-full bg-white"/>}</div><div className="flex-1"><p className="font-bold text-sm" style={{color:active?c.color:"#374151"}}>{r}</p><p className="text-xs mt-0.5" style={{color:active?c.color+"aa":"#9ca3af"}}>{c.desc}</p></div></button>);})}</div></div>
       {tipo!=="inspeccion"&&resultado!=="Aprobada"&&(<div><label className="block text-xs font-bold text-gray-400 mb-2 uppercase tracking-wider">Plazo para mejoras</label><div className="flex gap-2 flex-wrap mb-2">{["3 meses","6 meses","12 meses","18 meses","24 meses"].map(p=>(<button key={p} onClick={()=>setPlazo(p)} className="px-3 py-1.5 rounded-xl text-xs font-bold border-2 transition-all" style={{borderColor:plazo===p?Y:"#e5e7eb",background:plazo===p?Y+"15":"white",color:plazo===p?Y:"#6b7280"}}>{p}</button>))}</div><FI label="" value={plazo} onChange={(e:any)=>setPlazo(e.target.value)} placeholder="Ej: 12 meses"/></div>)}
       <div><label className="block text-xs font-bold text-gray-400 mb-2 uppercase tracking-wider">Notas adicionales</label><textarea value={notas} onChange={(e:any)=>setNotas(e.target.value)} rows={3} placeholder="Notas adicionales del informe…" className="w-full border-2 border-gray-100 rounded-xl px-3 py-2.5 text-sm bg-gray-50 resize-none focus:outline-none focus:border-amber-400 focus:bg-white transition-all"/></div>
-      <button onClick={()=>{setSaving(true);onConfirm({resultado,plazo:tipo==="inspeccion"?"N/A":plazo,notas});}} disabled={saving} className="w-full py-4 rounded-2xl font-extrabold text-white text-base hover:opacity-90 active:scale-95 transition-all disabled:opacity-60" style={{background:resultado==="Aprobada"?"#16a34a":resultado==="Condicionada"?Y:"#dc2626"}}>{saving?"⏳ Guardando…":"Generar Reporte →"}</button>
+      <div><label className="block text-xs font-bold text-gray-400 mb-2 uppercase tracking-wider">✍️ Firma del responsable</label>{firmaUrl?(<div className="relative"><img src={firmaUrl} alt="firma" className="w-full max-h-24 object-contain border-2 border-gray-100 rounded-xl bg-gray-50"/><button onClick={()=>setFirmaUrl(null)} className="absolute top-2 right-2 text-gray-400 hover:text-red-500 font-bold text-sm bg-white rounded-full w-6 h-6 flex items-center justify-center shadow">✕</button></div>):(<button onClick={()=>setShowFirma(true)} className="w-full py-3 border-2 border-dashed border-gray-200 rounded-xl text-xs font-bold text-gray-400 hover:border-amber-400 hover:text-amber-500 transition-all">+ Agregar firma</button>)}{showFirma&&<FirmaCanvas onConfirm={(url:string)=>{setFirmaUrl(url);setShowFirma(false);}} onClose={()=>setShowFirma(false)}/>}</div>
+      <div className="flex items-center justify-between px-4 py-2.5 rounded-xl" style={{background:"#f8f9fb"}}><span className="text-xs font-bold text-gray-500">Cumplimiento estimado</span><span className="text-sm font-extrabold" style={{color:cumpl>=80?"#16a34a":cumpl>=50?"#d97706":"#dc2626"}}>{cumpl}%</span></div>
+      <button onClick={()=>{setSaving(true);onConfirm({resultado,plazo:tipo==="inspeccion"?"N/A":plazo,notas,firmaUrl});}} disabled={saving} className="w-full py-4 rounded-2xl font-extrabold text-white text-base hover:opacity-90 active:scale-95 transition-all disabled:opacity-60" style={{background:resultado==="Aprobada"?"#16a34a":resultado==="Condicionada"?Y:"#dc2626"}}>{saving?"⏳ Guardando…":"Generar Reporte →"}</button>
     </div>
   </div></div>);
 }
 
 /* ══ HOME VIEW ══ */
 function HomeView({informes,loading,onNew,onOpen,usuario,onLogout}:any){
-  const[delTarget,setDel]=useState<any>(null);const[tabActiva,setTab]=useState("todos");
+  const[delTarget,setDel]=useState<any>(null);const[tabActiva,setTab]=useState("todos");const[busqueda,setBusq]=useState("");
   const[online,setOnline]=useState(navigator.onLine);const[exporting,setExp]=useState<string|null>(null);
   useEffect(()=>{const on=()=>setOnline(true);const off=()=>setOnline(false);window.addEventListener("online",on);window.addEventListener("offline",off);return()=>{window.removeEventListener("online",on);window.removeEventListener("offline",off);};},[]);
   const TABS=[{id:"todos",label:"Todos",icon:"📋"},{id:"verificacion",label:"Verificación",icon:"🔍"},{id:"inspeccion",label:"Inspección",icon:"⚡"},{id:"ac",label:"Aires AC",icon:"🌡️"}];
-  const filtrados=[...informes].sort((a:any,b:any)=>(b.createdAt||0)-(a.createdAt||0)).filter((inf:any)=>tabActiva==="todos"||inf.tipo===tabActiva);
+  const filtrados=[...informes].sort((a:any,b:any)=>(b.createdAt||0)-(a.createdAt||0)).filter((inf:any)=>(tabActiva==="todos"||inf.tipo===tabActiva)&&(!busqueda||inf.propietario?.toLowerCase().includes(busqueda.toLowerCase())||inf.codigo?.toLowerCase().includes(busqueda.toLowerCase())));
   const conteo=(tipo:string)=>informes.filter((i:any)=>tipo==="todos"?true:i.tipo===tipo).length;
   const tipoBadge=(t:string)=>t==="ac"?{label:"Aires AC",bg:"#0c4a6e22",color:"#0369a1"}:t==="inspeccion"?{label:"Inspección",bg:DARK+"18",color:DARK}:{label:"Verificación",bg:Y+"22",color:Y};
   const handleWord=async(inf:any)=>{setExp(inf.id);try{if(inf.tipo==="ac")await generateWordAC(inf);else await generateWordElectrico(inf);}catch(e:any){alert("Error al generar Word: "+e.message);}finally{setExp(null);}};
-  const handleZip=async(inf:any)=>{setExp(inf.id+"zip");try{await downloadImagesZip(inf);}catch(e:any){alert("Error al generar ZIP: "+e.message);}finally{setExp(null);}};
+  const handleZip=async(inf:any)=>{setExp(inf.id+"zip");try{await downloadImagesZip(inf);}catch(e:any){alert("Error al generar ZIP: "+e.message);}finally{setExp(null);};};
+  const handleShare=(inf:any)=>{if(inf.tipo==="ac")generatePDFAC(inf);else generatePDFElectrico(inf);setTimeout(()=>alert("El PDF se generó. Usa el botón Compartir del visor de impresión para enviarlo por WhatsApp, correo u otra app."),800);};
   return(<div className="min-h-screen" style={{background:"#f8f9fb"}}>
     <header style={{background:DARK}} className="px-4 py-4 sticky top-0 z-10 shadow-lg">
       <div className="flex items-center justify-between max-w-2xl mx-auto">
@@ -339,6 +412,7 @@ function HomeView({informes,loading,onNew,onOpen,usuario,onLogout}:any){
       </div>
     </header>
     <div className="p-4 max-w-2xl mx-auto">
+      <div className="relative mb-3"><input value={busqueda} onChange={(e:any)=>setBusq(e.target.value)} placeholder="🔍 Buscar por cliente o código…" className="w-full border-2 border-gray-100 rounded-xl px-4 py-2.5 text-sm bg-white focus:outline-none focus:border-amber-400 transition-all pr-8"/>{busqueda&&<button onClick={()=>setBusq("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-300 hover:text-gray-500 font-bold">✕</button>}</div>
       <div className="flex items-center justify-between mb-4 mt-1">
         <h2 className="font-bold text-gray-400 text-xs uppercase tracking-widest">{TABS.find(t=>t.id===tabActiva)?.label} ({filtrados.length})</h2>
         <span className={`text-xs font-medium ${online?"text-green-500":"text-amber-400"}`}>{online?"🔄 En línea":"📵 Sin conexión"}</span>
@@ -365,10 +439,14 @@ function HomeView({informes,loading,onNew,onOpen,usuario,onLogout}:any){
               <span className="text-[10px] text-gray-300 ml-auto">{inf.tipo==="ac"?inf.tecnico:inf.ingeniero}</span>
             </div>
           </div>
-          <div className="grid grid-cols-4 border-t border-gray-50 divide-x divide-gray-50 text-xs">
+          <div className="grid grid-cols-3 border-t border-gray-50 divide-x divide-gray-50 text-xs">
             {inf.resultado&&(<button onClick={()=>inf.tipo==="ac"?generatePDFAC(inf):generatePDFElectrico(inf)} className="py-2.5 text-gray-500 hover:bg-gray-50 font-semibold transition-colors flex items-center justify-center gap-1">🖨️ PDF</button>)}
             {inf.resultado&&(<button onClick={()=>handleWord(inf)} disabled={!!isExp} className="py-2.5 text-blue-500 hover:bg-blue-50 font-semibold transition-colors flex items-center justify-center gap-1 disabled:opacity-50">{isExp?"⏳":"📄"} Word</button>)}
             <button onClick={()=>handleZip(inf)} disabled={!!isExpZip} className="py-2.5 text-purple-500 hover:bg-purple-50 font-semibold transition-colors flex items-center justify-center gap-1 disabled:opacity-50">{isExpZip?"⏳":"🗜️"} Fotos</button>
+          </div>
+          <div className="grid grid-cols-3 border-t border-gray-50 divide-x divide-gray-50 text-xs">
+            {inf.resultado&&inf.tipo!=="ac"&&(<button onClick={()=>generateResumenEjecutivo(inf)} className="py-2.5 text-emerald-600 hover:bg-emerald-50 font-semibold transition-colors flex items-center justify-center gap-1">📋 Resumen</button>)}
+            {inf.resultado&&(<button onClick={()=>handleShare(inf)} className="py-2.5 text-amber-500 hover:bg-amber-50 font-semibold transition-colors flex items-center justify-center gap-1">📤 Compartir</button>)}
             <button onClick={()=>setDel(inf)} className="py-2.5 text-red-400 hover:bg-red-50 font-semibold transition-colors flex items-center justify-center gap-1">🗑️ Eliminar</button>
           </div>
         </div>);
@@ -379,12 +457,60 @@ function HomeView({informes,loading,onNew,onOpen,usuario,onLogout}:any){
 }
 
 /* ══ NUEVO ══ */
-function NuevoView({onCreate,onBack,usuario,tipo}:any){
+function NuevoView({onCreate,onBack,usuario,tipo,informes}:any){
   const[f,setF]=useState({codigo:"",propietario:"",direccion:"",fecha:HOY,ingeniero:tipo==="ac"?"":usuario.nombre,matricula:tipo==="ac"?"":usuario.matricula,tecnico:tipo==="ac"?usuario.nombre:""});
+  const[anterior2012,setAnt]=useState<boolean|null>(null);
+  const[notaExtra,setNotaExtra]=useState("");
+  const[creating,setCreating]=useState(false);
   const s=(k:string,v:string)=>setF((p:any)=>({...p,[k]:v}));
   const tipoLabel=tipo==="ac"?"Mantenimiento de Aires":tipo==="inspeccion"?"Inspección Eléctrica":"Verificación Eléctrica";
-  const go=()=>{if(!f.codigo.trim())return alert("El código de informe es requerido.");if(!f.propietario.trim())return alert("El nombre del cliente es requerido.");const base={...f,tipo,id:Date.now(),createdAt:Date.now()};if(tipo==="ac")onCreate({...base,equipos:[],resultado:null,notas:""});else onCreate({...base,elementos:[],resultado:null,plazo:"12 meses",notas:""});};
-  return(<div className="min-h-screen" style={{background:"#f8f9fb"}}><header style={{background:DARK}} className="px-4 py-4 sticky top-0 z-10"><div className="flex items-center gap-3 max-w-lg mx-auto"><button onClick={onBack} className="text-white/60 hover:text-white text-xl transition-colors">←</button><Logo sm white/><span className="font-bold text-white text-sm ml-1">{tipoLabel}</span></div></header><div className="p-4 max-w-lg mx-auto space-y-3 pb-24"><Card title="Identificación" accent><FI label="Código del informe *" value={f.codigo} onChange={(e:any)=>s("codigo",e.target.value)} placeholder="INF-26-055"/><FI label="Fecha *" value={f.fecha} onChange={(e:any)=>s("fecha",e.target.value)} type="date"/></Card><Card title="Datos del Cliente" accent><FI label="Cliente / Propietario *" value={f.propietario} onChange={(e:any)=>s("propietario",e.target.value)} placeholder="Nombre completo…"/><FI label="Dirección / Ubicación" value={f.direccion} onChange={(e:any)=>s("direccion",e.target.value)} placeholder="San José, Montes de Oca…"/></Card>{tipo==="ac"?(<Card title="Responsable del Mantenimiento" accent><FI label="Técnico responsable" value={f.tecnico} onChange={(e:any)=>s("tecnico",e.target.value)} placeholder="Nombre del técnico o responsable"/></Card>):(<Card title="Responsable de Verificación" accent><FI label="Nombre del Ingeniero" value={f.ingeniero} onChange={(e:any)=>s("ingeniero",e.target.value)} placeholder="Ing. Nombre Apellido"/><FI label="Matrícula" value={f.matricula} onChange={(e:any)=>s("matricula",e.target.value)} placeholder="IE-XXXXX / CAPDEE-XXX"/></Card>)}<Btn onClick={go} full>{tipo==="ac"?"Continuar → Agregar equipos":"Iniciar →"}</Btn></div></div>);
+  useEffect(()=>{if(f.codigo==="")setF(p=>({...p,codigo:suggestCodigo(informes||[])}));},[]);
+  const go=()=>{
+    if(creating)return;
+    if(!f.codigo.trim())return alert("El código de informe es requerido.");
+    if(!f.propietario.trim())return alert("El nombre del cliente es requerido.");
+    if(tipo==="verificacion"&&anterior2012===null)return alert("Indica si la instalación es anterior a agosto de 2012.");
+    setCreating(true);
+    const notaFinal=anterior2012===true?NOTA_AGOSTO_2012:notaExtra.trim();
+    const base={...f,tipo,id:Date.now(),createdAt:Date.now(),notaInstalacion:notaFinal};
+    if(tipo==="ac")onCreate({...base,equipos:[],resultado:null,notas:""});
+    else onCreate({...base,elementos:[],resultado:null,plazo:"12 meses",notas:notaFinal});
+  };
+  return(<div className="min-h-screen" style={{background:"#f8f9fb"}}>
+    <header style={{background:DARK}} className="px-4 py-4 sticky top-0 z-10"><div className="flex items-center gap-3 max-w-lg mx-auto"><button onClick={onBack} className="text-white/60 hover:text-white text-xl transition-colors">←</button><Logo sm white/><span className="font-bold text-white text-sm ml-1">{tipoLabel}</span></div></header>
+    <div className="p-4 max-w-lg mx-auto space-y-3 pb-24">
+      <Card title="Identificación" accent>
+        <div><label className="block text-xs font-semibold text-gray-400 mb-1 uppercase tracking-wider">Código del informe *</label><div className="flex gap-2"><input value={f.codigo} onChange={(e:any)=>s("codigo",e.target.value)} className="flex-1 border-2 border-gray-100 rounded-xl px-3 py-2.5 text-sm text-gray-800 bg-gray-50 focus:outline-none focus:border-amber-400 focus:bg-white transition-all" placeholder="INF-26-055"/><button onClick={()=>setF(p=>({...p,codigo:suggestCodigo(informes||[])}))} className="px-3 py-2 rounded-xl text-xs font-bold border-2 border-gray-100 text-gray-400 hover:border-amber-400 hover:text-amber-500 transition-all" title="Sugerir siguiente código">🔄</button></div></div>
+        <FI label="Fecha *" value={f.fecha} onChange={(e:any)=>s("fecha",e.target.value)} type="date"/>
+      </Card>
+      <Card title="Datos del Cliente" accent>
+        <FI label="Cliente / Propietario *" value={f.propietario} onChange={(e:any)=>s("propietario",e.target.value)} placeholder="Nombre completo…"/>
+        <FI label="Dirección / Ubicación" value={f.direccion} onChange={(e:any)=>s("direccion",e.target.value)} placeholder="San José, Montes de Oca…"/>
+      </Card>
+      {tipo==="ac"?(
+        <Card title="Responsable del Mantenimiento" accent>
+          <FI label="Técnico responsable" value={f.tecnico} onChange={(e:any)=>s("tecnico",e.target.value)} placeholder="Nombre del técnico o responsable"/>
+        </Card>
+      ):(
+        <Card title="Responsable de Verificación" accent>
+          <FI label="Nombre del Ingeniero" value={f.ingeniero} onChange={(e:any)=>s("ingeniero",e.target.value)} placeholder="Ing. Nombre Apellido"/>
+          <FI label="Matrícula" value={f.matricula} onChange={(e:any)=>s("matricula",e.target.value)} placeholder="IE-XXXXX / CAPDEE-XXX"/>
+        </Card>
+      )}
+      {tipo==="verificacion"&&(
+        <Card title="Antigüedad de la Instalación" accent>
+          <p className="text-xs text-gray-500 mb-3">¿La instalación eléctrica es <b>anterior a agosto de 2012</b>?</p>
+          <div className="flex gap-3">
+            <button onClick={()=>setAnt(true)} className={`flex-1 py-3 rounded-xl font-bold text-sm border-2 transition-all ${anterior2012===true?"text-white border-amber-500":"border-gray-200 text-gray-400 hover:border-amber-300"}`} style={anterior2012===true?{background:Y}:{}}>Sí, es anterior</button>
+            <button onClick={()=>setAnt(false)} className={`flex-1 py-3 rounded-xl font-bold text-sm border-2 transition-all ${anterior2012===false?"text-white border-gray-700 bg-gray-700":"border-gray-200 text-gray-400 hover:border-gray-400"}`}>No</button>
+          </div>
+          {anterior2012===true&&(<div className="mt-3 p-3 rounded-xl bg-amber-50 border border-amber-200"><p className="text-[10px] text-amber-700 leading-relaxed">Se incluirá automáticamente la nota sobre instalaciones anteriores al RTCR 458:2011.</p></div>)}
+          {anterior2012===false&&(<div className="mt-3"><label className="block text-xs font-semibold text-gray-400 mb-1 uppercase tracking-wider">Nota adicional (opcional)</label><textarea value={notaExtra} onChange={(e:any)=>setNotaExtra(e.target.value)} rows={3} placeholder="Nota adicional sobre la instalación…" className="w-full border-2 border-gray-100 rounded-xl px-3 py-2.5 text-sm bg-gray-50 resize-none focus:outline-none focus:border-amber-400 focus:bg-white transition-all"/></div>)}
+        </Card>
+      )}
+      <Btn onClick={go} disabled={creating} full>{creating?"Creando…":tipo==="ac"?"Continuar → Agregar equipos":"Iniciar →"}</Btn>
+    </div>
+  </div>);
 }
 
 /* ══ EQUIPO AC MODAL ══ */
@@ -497,7 +623,7 @@ function MantenimientoACView({informe,onUpdate,onBack,onFinalize}:any){
 /* ══ ELEMENTO MODAL ══ */
 function ElementoModal({el,num,onSave,onClose}:any){
   const[titulo,setT]=useState(el?.titulo||"");const[url,setUrl]=useState<string|null>(el?.url||null);
-  const[b64x,setB64]=useState<string|null>(el?.b64||null);const[H,setH]=useState<string[]>(el?.hallazgos||[]);
+  const[b64x,setB64]=useState<string|null>(el?.b64||null);const[H,setH]=useState<string[]>(el?.hallazgos||[]);const[N,setN]=useState<string[]>(el?.notas||[]);
   const[A,setA]=useState<string[]>(el?.acciones||[]);const[prio,setP]=useState(el?.prioridad||"normal");
   const[busy,setBusy]=useState(false);const[err,setErr]=useState<string|null>(null);const[annot,setAnn]=useState<string|null>(null);
   const fRef=useRef<HTMLInputElement>(null);
@@ -512,8 +638,8 @@ function ElementoModal({el,num,onSave,onClose}:any){
     }catch{setErr("Error al procesar la imagen.");}
   };
   const onAnnotConfirm=(fu:string,fb:string)=>{setUrl(fu);setB64(fb);setAnn(null);if(titulo.trim())analyze(fb);else setErr("Foto guardada. Escribe el título y toca IA NEC.");};
-  const analyze=async(b=b64x)=>{if(!b){setErr("Primero adjunta foto.");return;}if(!titulo.trim()){setErr("Escribe el título.");return;}setBusy(true);setErr(null);try{const r=await callAI(b,titulo.trim());setH(r.hallazgos||[]);setA(r.acciones||[]);}catch(e:any){setErr("Error IA: "+e.message);}finally{setBusy(false);};};
-  const save=()=>{if(!titulo.trim()){setErr("El título es requerido.");return;}onSave({titulo:titulo.trim(),url,b64:b64x,hallazgos:H,acciones:A,prioridad:prio,num});};
+  const analyze=async(b=b64x)=>{if(!b){setErr("Primero adjunta foto.");return;}if(!titulo.trim()){setErr("Escribe el título.");return;}setBusy(true);setErr(null);try{const r=await callAI(b,titulo.trim());setH(r.hallazgos||[]);setA(r.acciones||[]);setN(r.notas||[]);}catch(e:any){setErr("Error IA: "+e.message);}finally{setBusy(false);};};
+  const save=()=>{if(!titulo.trim()){setErr("El título es requerido.");return;}onSave({titulo:titulo.trim(),url,b64:b64x,hallazgos:H,acciones:A,notas:N,prioridad:prio,num});};
   if(annot)return<AnnotationEditor imageUrl={annot} onConfirm={onAnnotConfirm} onClose={()=>{setAnn(null);setB64(null);setUrl(null);}}/>;
   return(<div className="fixed inset-0 bg-black/70 z-40 flex flex-col justify-end sm:justify-center sm:items-center sm:p-4">
     <div className="bg-white w-full sm:max-w-lg rounded-t-3xl sm:rounded-3xl overflow-hidden flex flex-col" style={{maxHeight:"93vh"}}>
@@ -541,8 +667,8 @@ function ElementoModal({el,num,onSave,onClose}:any){
         {busy&&<div className="flex items-center justify-center gap-3 py-4 rounded-2xl" style={{background:Y+"15"}}><div className="w-5 h-5 rounded-full border-2 animate-spin" style={{borderColor:Y,borderTopColor:"transparent"}}/><span className="text-sm font-bold" style={{color:Y}}>Analizando con NEC 2020…</span></div>}
         {err&&<div className="bg-red-50 border-2 border-red-100 rounded-2xl p-3 text-xs text-red-600 font-medium">⚠️ {err}</div>}
         <div><label className="block text-xs font-bold text-gray-400 mb-2 uppercase tracking-wider">Prioridad</label><div className="flex gap-2">{PRIOS.map(p=><Pill key={p.v} active={prio===p.v} color={p.c} onClick={()=>setP(p.v)}>{p.L}</Pill>)}</div></div>
-        <ListEditor label="Hallazgos" items={H} set={setH} placeholder="Hallazgo con artículo NEC 2020…"/>
-        <ListEditor label="Acciones Requeridas" items={A} set={setA} placeholder="Acción correctiva específica…"/>
+        <ListEditor label="Acciones Requeridas" items={A} set={setA} placeholder="Acción correctiva específica…" tipo="acciones"/>
+        <ListEditor label="Hallazgos" items={H} set={setH} placeholder="Hallazgo con artículo NEC 2020…" tipo="hallazgos"/>
       </div>
     </div>
   </div>);
@@ -554,6 +680,8 @@ function InspeccionView({informe,onUpdate,onBack,onFinalize}:any){
   const tipo=informe.tipo||"verificacion";const tipoLabel=tipo==="inspeccion"?"Inspección":"Verificación";
   const saveEl=(el:any)=>{const els=[...(informe.elementos||[])];if(editIdx!==null)els[editIdx]={...el,num:editIdx+1};else els.push({...el,num:els.length+1});const updated={...informe,elementos:els};setModal(false);onUpdate(updated);saveInformeFS(updated);};
   const delEl=(i:number)=>{if(!confirm("¿Eliminar?"))return;const els=informe.elementos.filter((_:any,j:number)=>j!==i).map((e:any,j:number)=>({...e,num:j+1}));const updated={...informe,elementos:els};onUpdate(updated);saveInformeFS(updated);};
+  const dupEl=(i:number)=>{const src={...informe.elementos[i]};const els=[...informe.elementos,{...src,num:informe.elementos.length+1,titulo:src.titulo+" (copia)"}];const updated={...informe,elementos:els};onUpdate(updated);saveInformeFS(updated);};
+  const moveEl=(i:number,dir:number)=>{const els=[...informe.elementos];const j=i+dir;if(j<0||j>=els.length)return;[els[i],els[j]]=[els[j],els[i]];const renumbered=els.map((e,k)=>({...e,num:k+1}));const updated={...informe,elementos:renumbered};onUpdate(updated);saveInformeFS(updated);};
   const handleFinalize=(data:any)=>{const updated={...informe,...data};saveInformeFS(updated);onFinalize(updated);setFinalM(false);};
   const alta=(informe.elementos||[]).filter((e:any)=>e.prioridad==="alta").length,total=informe.elementos?.length||0;
   return(<div className="min-h-screen" style={{background:"#f8f9fb"}}>
@@ -568,7 +696,7 @@ function InspeccionView({informe,onUpdate,onBack,onFinalize}:any){
       {!total?(<div className="text-center py-20"><div className="w-20 h-20 rounded-2xl mx-auto mb-5 flex items-center justify-center text-4xl" style={{background:Y+"22"}}>📷</div><p className="text-gray-400 text-sm">Toca <b style={{color:Y}}>+</b> para agregar el primer elemento</p></div>):(
         informe.elementos.map((el:any,i:number)=>(<div key={i} className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
           <div className="flex gap-3 p-3">{el.url?<img src={el.url} alt={el.titulo} className="w-20 h-20 object-cover rounded-xl shrink-0"/>:<div className="w-20 h-20 bg-gray-100 rounded-xl shrink-0 flex items-center justify-center text-2xl">📷</div>}<div className="flex-1 min-w-0"><div className="flex items-center justify-between gap-1 mb-1"><span className="font-mono text-[10px] text-gray-300">({el.num})</span><Badge v={el.prioridad}/></div><div className="font-bold text-sm text-gray-800 leading-snug">{el.titulo}</div><div className="text-xs text-gray-400 mt-1">{el.hallazgos?.length||0} hallazgos · {el.acciones?.length||0} acciones</div></div></div>
-          <div className="flex border-t border-gray-50 divide-x divide-gray-50 text-xs"><button onClick={()=>{setEditIdx(i);setModal(true);}} className="flex-1 py-2.5 text-gray-500 hover:bg-gray-50 font-semibold transition-colors">✏️ Editar</button><button onClick={()=>delEl(i)} className="flex-1 py-2.5 text-red-400 hover:bg-red-50 font-semibold transition-colors">🗑️ Eliminar</button></div>
+          <div className="flex border-t border-gray-50 divide-x divide-gray-50 text-xs"><button onClick={()=>moveEl(i,-1)} disabled={i===0} className="py-2.5 px-3 text-gray-400 hover:bg-gray-50 disabled:opacity-30 transition-colors">↑</button><button onClick={()=>moveEl(i,1)} disabled={i===(informe.elementos?.length||0)-1} className="py-2.5 px-3 text-gray-400 hover:bg-gray-50 disabled:opacity-30 transition-colors">↓</button><button onClick={()=>{setEditIdx(i);setModal(true);}} className="flex-1 py-2.5 text-gray-500 hover:bg-gray-50 font-semibold transition-colors">✏️ Editar</button><button onClick={()=>dupEl(i)} className="py-2.5 px-3 text-blue-400 hover:bg-blue-50 font-semibold transition-colors">📋</button><button onClick={()=>delEl(i)} className="flex-1 py-2.5 text-red-400 hover:bg-red-50 font-semibold transition-colors">🗑️</button></div>
         </div>))
       )}
       <div className={`rounded-2xl border-2 overflow-hidden ${informe.resultado?"border-green-200 bg-green-50":"border-dashed border-gray-200 bg-white"}`}>
@@ -598,7 +726,7 @@ export default function App(){
   if(view==="login")    return<LoginView onLogin={login}/>;
   if(view==="selector") return<TipoSelectorView onSelect={handleTipo} usuario={usuario} onLogout={logout}/>;
   if(view==="home")     return<HomeView informes={informes} loading={loading} onNew={()=>setV("selector")} onOpen={open} usuario={usuario} onLogout={logout}/>;
-  if(view==="nuevo")    return<NuevoView onCreate={create} onBack={()=>setV("selector")} usuario={usuario} tipo={tipoNuevo}/>;
+  if(view==="nuevo")    return<NuevoView onCreate={create} onBack={()=>setV("selector")} usuario={usuario} tipo={tipoNuevo} informes={informes}/>;
   if(view==="insp")     return<InspeccionView informe={active} onUpdate={update} onBack={()=>setV("home")} onFinalize={finalize}/>;
   if(view==="ac")       return<MantenimientoACView informe={active} onUpdate={update} onBack={()=>setV("home")} onFinalize={finalize}/>;
 }
