@@ -27,7 +27,12 @@ const fbApp = initializeApp(firebaseConfig);
 const db = initializeFirestore(fbApp, {
   localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
 });
-const saveInformeFS   = async (inf: any) => { await setDoc(doc(db,"informes",String(inf.id)),{...inf,updatedAt:serverTimestamp()}); };
+// Fire-and-forget: escribe en caché local inmediatamente (offline OK)
+// La sincronización con el servidor ocurre sola cuando hay red
+const saveInformeFS = (inf: any): void => {
+  setDoc(doc(db,"informes",String(inf.id)),{...inf,updatedAt:serverTimestamp()})
+    .catch((err) => console.warn("[Firestore] sync pendiente:", err));
+};
 const deleteInformeFS = async (id: any)  => { await deleteDoc(doc(db,"informes",String(id))); };
 
 const USUARIOS = [
@@ -462,9 +467,9 @@ function EquipoACModal({equipo,num,onSave,onClose}:any){
 function MantenimientoACView({informe,onUpdate,onBack,onFinalize}:any){
   const[modal,setModal]=useState(false);const[editIdx,setEditIdx]=useState<number|null>(null);const[syncing,setSyncing]=useState(false);
   const equipos=informe.equipos||[];const aprobados=equipos.filter((e:any)=>e.resultado==="Aprobado").length;const noAprobados=equipos.filter((e:any)=>e.resultado==="No Aprobado").length;
-  const saveEquipo=async(eq:any)=>{const list=[...equipos];if(editIdx!==null)list[editIdx]={...eq,num:editIdx+1};else list.push({...eq,num:list.length+1});const updated={...informe,equipos:list};setSyncing(true);await saveInformeFS(updated);setSyncing(false);onUpdate(updated);setModal(false);};
-  const delEquipo=async(i:number)=>{if(!confirm("¿Eliminar este equipo?"))return;const list=equipos.filter((_:any,j:number)=>j!==i).map((e:any,j:number)=>({...e,num:j+1}));const updated={...informe,equipos:list};await saveInformeFS(updated);onUpdate(updated);};
-  const handleFinalizar=async()=>{if(equipos.length===0){alert("Agrega al menos un equipo antes de finalizar.");return;}const updated={...informe,resultado:"Completado",finalizadoAt:Date.now()};setSyncing(true);await saveInformeFS(updated);setSyncing(false);onFinalize(updated);};
+  const saveEquipo=(eq:any)=>{const list=[...equipos];if(editIdx!==null)list[editIdx]={...eq,num:editIdx+1};else list.push({...eq,num:list.length+1});const updated={...informe,equipos:list};setModal(false);onUpdate(updated);saveInformeFS(updated);};
+  const delEquipo=(i:number)=>{if(!confirm("¿Eliminar este equipo?"))return;const list=equipos.filter((_:any,j:number)=>j!==i).map((e:any,j:number)=>({...e,num:j+1}));const updated={...informe,equipos:list};onUpdate(updated);saveInformeFS(updated);};
+  const handleFinalizar=()=>{if(equipos.length===0){alert("Agrega al menos un equipo antes de finalizar.");return;}const updated={...informe,resultado:"Completado",finalizadoAt:Date.now()};saveInformeFS(updated);onFinalize(updated);};
   return(<div className="min-h-screen" style={{background:"#f8f9fb"}}>
     <header style={{background:"#0c4a6e"}} className="px-4 py-4 sticky top-0 z-10 shadow-lg">
       <div className="max-w-2xl mx-auto">
@@ -547,9 +552,9 @@ function ElementoModal({el,num,onSave,onClose}:any){
 function InspeccionView({informe,onUpdate,onBack,onFinalize}:any){
   const[modal,setModal]=useState(false);const[editIdx,setEditIdx]=useState<number|null>(null);const[finalM,setFinalM]=useState(false);const[syncing,setSyncing]=useState(false);
   const tipo=informe.tipo||"verificacion";const tipoLabel=tipo==="inspeccion"?"Inspección":"Verificación";
-  const saveEl=async(el:any)=>{const els=[...(informe.elementos||[])];if(editIdx!==null)els[editIdx]={...el,num:editIdx+1};else els.push({...el,num:els.length+1});const updated={...informe,elementos:els};setSyncing(true);await saveInformeFS(updated);setSyncing(false);onUpdate(updated);setModal(false);};
-  const delEl=async(i:number)=>{if(!confirm("¿Eliminar?"))return;const els=informe.elementos.filter((_:any,j:number)=>j!==i).map((e:any,j:number)=>({...e,num:j+1}));const updated={...informe,elementos:els};await saveInformeFS(updated);onUpdate(updated);};
-  const handleFinalize=async(data:any)=>{const updated={...informe,...data};setSyncing(true);await saveInformeFS(updated);setSyncing(false);onFinalize(updated);setFinalM(false);};
+  const saveEl=(el:any)=>{const els=[...(informe.elementos||[])];if(editIdx!==null)els[editIdx]={...el,num:editIdx+1};else els.push({...el,num:els.length+1});const updated={...informe,elementos:els};setModal(false);onUpdate(updated);saveInformeFS(updated);};
+  const delEl=(i:number)=>{if(!confirm("¿Eliminar?"))return;const els=informe.elementos.filter((_:any,j:number)=>j!==i).map((e:any,j:number)=>({...e,num:j+1}));const updated={...informe,elementos:els};onUpdate(updated);saveInformeFS(updated);};
+  const handleFinalize=(data:any)=>{const updated={...informe,...data};saveInformeFS(updated);onFinalize(updated);setFinalM(false);};
   const alta=(informe.elementos||[]).filter((e:any)=>e.prioridad==="alta").length,total=informe.elementos?.length||0;
   return(<div className="min-h-screen" style={{background:"#f8f9fb"}}>
     <header style={{background:DARK}} className="px-4 py-4 sticky top-0 z-10 shadow-lg">
@@ -581,67 +586,19 @@ export default function App(){
   const[view,setV]=useState("login");const[usuario,setUsr]=useState<any>(()=>lsto.get("e_usr")||null);
   const[tipoNuevo,setTipo]=useState<string|null>(null);const[informes,setI]=useState<any[]>([]);
   const[loading,setLoad]=useState(true);const[active,setAct]=useState<any>(null);
-  const[installPrompt,setInstallPrompt]=useState<any>(null);
-  const[showIosTip,setShowIosTip]=useState(false);
-
-  // Detecta el evento de instalación en Android/Chrome
-  useEffect(()=>{
-    const handler=(e:any)=>{e.preventDefault();setInstallPrompt(e);};
-    window.addEventListener("beforeinstallprompt",handler);
-    return()=>window.removeEventListener("beforeinstallprompt",handler);
-  },[]);
-
-  // Detecta iOS para mostrar instrucción manual
-  useEffect(()=>{
-    const isIos=(/iphone|ipad|ipod/i.test(navigator.userAgent));
-    const isStandalone=(window.navigator as any).standalone===true;
-    const yaVisto=lsto.get("ios_tip_visto");
-    if(isIos&&!isStandalone&&!yaVisto) setShowIosTip(true);
-  },[]);
-
   useEffect(()=>{if(!usuario){setLoad(false);return;}const q=query(collection(db,"informes"),orderBy("createdAt","desc"));const unsub=onSnapshot(q,(snap)=>{setI(snap.docs.map(d=>({...d.data(),id:d.id})));setLoad(false);},(err)=>{console.error("Firestore:",err);setLoad(false);});return()=>unsub();},[usuario]);
   useEffect(()=>{if(usuario)setV("selector");},[usuario]);
   const login=(u:any)=>{lsto.set("e_usr",u);setUsr(u);setV("selector");};
   const logout=()=>{lsto.set("e_usr",null);setUsr(null);setV("login");};
-  const create=async(data:any)=>{await saveInformeFS(data);setAct(data);setV(data.tipo==="ac"?"ac":"insp");};
+  const create=(data:any)=>{saveInformeFS(data);setAct(data);setV(data.tipo==="ac"?"ac":"insp");};
   const update=(inf:any)=>{setI(prev=>prev.map(i=>String(i.id)===String(inf.id)?inf:i));setAct(inf);};
   const open=(inf:any)=>{setAct(inf);setV(inf.tipo==="ac"?"ac":"insp");};
   const finalize=(inf:any)=>{setI(prev=>prev.map(i=>String(i.id)===String(inf.id)?inf:i));setAct(inf);setV("home");};
   const handleTipo=(t:string)=>{if(t==="home"){setV("home");return;}setTipo(t);setV("nuevo");};
-  const handleInstall=async()=>{if(!installPrompt)return;installPrompt.prompt();const{outcome}=await installPrompt.userChoice;if(outcome==="accepted")setInstallPrompt(null);};
-  const dismissIosTip=()=>{lsto.set("ios_tip_visto",true);setShowIosTip(false);};
-
-  return(<>
-    {/* Banner iOS — instrucción para "Añadir a pantalla de inicio" */}
-    {showIosTip&&(
-      <div className="fixed bottom-0 left-0 right-0 z-50 p-4" style={{background:DARK}}>
-        <div className="max-w-sm mx-auto bg-white rounded-2xl p-4 shadow-2xl">
-          <div className="flex items-start gap-3">
-            <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 text-xl" style={{background:"#F5A800"}}>⚡</div>
-            <div className="flex-1 min-w-0">
-              <p className="font-bold text-gray-900 text-sm mb-1">Instalar Electrizar</p>
-              <p className="text-xs text-gray-500 leading-relaxed">Toca <b>Compartir</b> <span className="font-mono bg-gray-100 px-1 rounded">↑</span> y luego <b>"Añadir a pantalla de inicio"</b> para usarla sin internet.</p>
-            </div>
-            <button onClick={dismissIosTip} className="text-gray-300 hover:text-gray-500 font-bold text-lg shrink-0">✕</button>
-          </div>
-        </div>
-      </div>
-    )}
-
-    {/* Botón de instalación Android — solo aparece si el browser lo permite */}
-    {installPrompt&&view==="home"&&(
-      <div className="fixed bottom-24 right-4 z-40">
-        <button onClick={handleInstall} className="flex items-center gap-2 px-4 py-3 rounded-2xl shadow-2xl font-bold text-sm text-gray-900 active:scale-95 transition-all" style={{background:"#F5A800"}}>
-          📲 Instalar app
-        </button>
-      </div>
-    )}
-
-    {view==="login"    &&<LoginView onLogin={login}/>}
-    {view==="selector" &&<TipoSelectorView onSelect={handleTipo} usuario={usuario} onLogout={logout}/>}
-    {view==="home"     &&<HomeView informes={informes} loading={loading} onNew={()=>setV("selector")} onOpen={open} usuario={usuario} onLogout={logout}/>}
-    {view==="nuevo"    &&<NuevoView onCreate={create} onBack={()=>setV("selector")} usuario={usuario} tipo={tipoNuevo}/>}
-    {view==="insp"     &&<InspeccionView informe={active} onUpdate={update} onBack={()=>setV("home")} onFinalize={finalize}/>}
-    {view==="ac"       &&<MantenimientoACView informe={active} onUpdate={update} onBack={()=>setV("home")} onFinalize={finalize}/>}
-  </>);
+  if(view==="login")    return<LoginView onLogin={login}/>;
+  if(view==="selector") return<TipoSelectorView onSelect={handleTipo} usuario={usuario} onLogout={logout}/>;
+  if(view==="home")     return<HomeView informes={informes} loading={loading} onNew={()=>setV("selector")} onOpen={open} usuario={usuario} onLogout={logout}/>;
+  if(view==="nuevo")    return<NuevoView onCreate={create} onBack={()=>setV("selector")} usuario={usuario} tipo={tipoNuevo}/>;
+  if(view==="insp")     return<InspeccionView informe={active} onUpdate={update} onBack={()=>setV("home")} onFinalize={finalize}/>;
+  if(view==="ac")       return<MantenimientoACView informe={active} onUpdate={update} onBack={()=>setV("home")} onFinalize={finalize}/>;
 }
